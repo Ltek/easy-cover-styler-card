@@ -1,0 +1,16 @@
+Flex Cover Card (formerly Enhanced Shutter Card)
+
+This project builds on prior open-source work:
+
+- hass-shutter-card by deejayfool — https://github.com/deejayfool/hass-shutter-card
+  Licensed under the Apache License, Version 2.0.
+  Base roller-shutter concept and imagery.
+
+- pic-shutter-card by samoswall — https://github.com/samoswall/pic-shutter-card
+  Window, balcony-door, outside-view and curtain/blind images
+  (files bundled here with the "psc-" prefix) are used with the
+  author's permission.
+
+Image files prefixed "psc-" in dist/ originate from pic-shutter-card and
+were modified only by renaming. All other bundled images (prefixed "esc-")
+are part of this project.
