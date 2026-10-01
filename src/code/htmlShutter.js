@@ -32,7 +32,6 @@ export class htmlShutter{
 
       --esc-overflow: ${this.enhancedShutter.getOverflow()};
 
-      --esc-flex-name_opening-flow: ${this.cfg.inlineHeader() ? 'row' : 'column'} nowrap;
       --esc-flex-flow-middle: ${!this.cfg.buttonGroupInRow() ? 'column': 'row'}${this.cfg.buttonsContainerReversed() ? '-reverse' : ''} nowrap;
       --esc-window-height: ${this.cfg.windowHeightPx()+C.UNITY};
       --esc-window-width1: ${this.cfg.buttonGroupInRow() ? '100%': this.cfg.windowWidthPx()+C.UNITY};
@@ -96,8 +95,6 @@ export class htmlShutter{
       --esc-top-icon-text-font-size: ${this.cfg.iconScalePercent()};
       --esc-text-scale: ${this.cfg.textScaleFactor()};
       --esc-button-scale: ${this.cfg.buttonScaleFactor()};
-      --esc-header-align: ${this.cfg.headerAlignCss ? this.cfg.headerAlignCss() : 'center'};
-      --esc-header-gap: ${this.cfg.headerGap ? this.cfg.headerGap() : 0}px;
       ${this.cfg.fontStyleVars ? this.cfg.fontStyleVars() : ''}
     `;
   }

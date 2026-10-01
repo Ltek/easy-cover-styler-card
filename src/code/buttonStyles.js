@@ -6,6 +6,7 @@
  * the render applicator is adapted for the area-selector buttons (no live-light color — the
  * button's "own color" is the theme accent, and "active" = the selected area).
  */
+import { bumpLibRev } from './libRev.js';
 import {clamp} from './dividers.js';
 
 export const BUTTON_STYLE_GROUPS = {
@@ -73,13 +74,24 @@ function _btnStyleParseValue(value) {
 }
 export function ensureButtonStyleLibrary(hass, onChange) {
   const st = BTN_STYLE_LIBRARY.system;
+  // v2026.09.24.144: keep a LIST of listeners. The old code subscribed once and captured only that
+  // first caller's callback, so whichever of the card or the editor reached here first won the
+  // subscription and the other was never told about a change. In practice the editor usually won,
+  // which is why saving a style did not refresh the card preview beside it — the preview only picked
+  // the change up when the element was recreated.
+  st.listeners = st.listeners || new Set();
+  if (typeof onChange === 'function') st.listeners.add(onChange);
   if (!hass || !hass.connection || st.subscribed) return;
   const conn = hass.connection;
   if (typeof conn.subscribeMessage === 'function') {
     st.subscribed = true;
     try {
-      conn.subscribeMessage((ev) => { st.map = _btnStyleParseValue(ev && ev.value); st.loaded = true; if (typeof onChange === 'function') { try { onChange(); } catch (e) {} } },
-        { type: 'frontend/subscribe_system_data', key: BTN_STYLE_LIB_KEY });
+      conn.subscribeMessage((ev) => {
+        st.map = _btnStyleParseValue(ev && ev.value);
+        st.loaded = true;
+        bumpLibRev();
+        st.listeners.forEach((fn) => { try { fn(); } catch (e) {} });
+      }, { type: 'frontend/subscribe_system_data', key: BTN_STYLE_LIB_KEY });
     } catch (e) { st.subscribed = false; }
   }
 }
@@ -218,6 +230,15 @@ function gradientBorderBackground(g, matchColor) {
   return { image: imgs.join(', '), size: sizes.join(', '), position: positions.join(', '), repeat: imgs.map(() => 'no-repeat').join(', ') };
 }
 
+// v2026.09.24.183: flattened appearance for any stack object — used by the library previews.
+export function buttonAppearanceFromStack(stack, isActive) {
+  return flattenButtonStack(stack, (when) => {
+    if (!when || !when.type) return true;
+    if (when.type === 'button_active') return !!isActive;
+    if (when.type === 'button_off') return !isActive;
+    return true;
+  });
+}
 // Resolve a `lib:<slug>` / built-in-slug reference to a flattened appearance for the given active state.
 export function resolveButtonAppearance(ref, isActive) {
   const slug = fixtureRefSlug(ref) || (isBuiltinButtonSlug(ref) ? ref : null);
@@ -305,4 +326,13 @@ export function areaButtonIcon(cfg, isActive, accent) {
   const color = cfg.button_icon_color_mode ? resolveButtonColor(cfg.button_icon_color_mode, cfg.button_icon_color || '#2196F3', accent, 'none') : null;
   const s = `${size > 0 ? `--mdc-icon-size:${size}px;` : ''}${color ? `color:${color};` : ''}`;
   return { icon, style: s };
+}
+
+// v2026.10.01.190: remove a listener added by the ensure function. Callers pass ONE stable function per
+// card/editor instance and remove it when that instance leaves the page.
+export function offButtonStyleLibrary(fn) {
+  Object.values(BTN_STYLE_LIBRARY).forEach((st) => { if (st && st.listeners) st.listeners.delete(fn); });
+}
+export function buttonStyleListenerCount() {
+  return Object.values(BTN_STYLE_LIBRARY).reduce((n, st) => n + ((st && st.listeners) ? st.listeners.size : 0), 0);
 }

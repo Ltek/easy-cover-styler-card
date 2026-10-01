@@ -1,5 +1,12 @@
 import * as C from './constants.js';
 //import {EscImages} from './escImages.js';
+import {ensureFrameLibrary, offFrameLibrary, frameCss} from './frames.js';
+import {libRev} from './libRev.js';
+import {migrateConfig, warnLegacyLeftovers} from './migrate.js';
+
+// Survives preview-element recreation: which area the user last picked, per card shape. Declared at
+// module scope deliberately — it is transient UI state, never written to the card config.
+const LAST_SELECTED_AREA = new Map();
 import {LitElement, html, css, unsafeCSS } from './lit/lit-core.min.js';
 
 import {
@@ -8,15 +15,17 @@ import {
   findElement,
   console_log,
   getDebug,
-  resizeDebugger
+  resizeDebugger,
+  sizeRotationWrapper
 } from './functions.js';
 
 import * as HtmlBlocks from './htmlBlocks.js';
 import {EscImages} from './escImages.js';
 import {xyPair} from './xyPair.js';
 import {dividerLineHtml, dividerVerticalHtml, DIVIDER_GRADIENT_PATTERNS} from './dividers.js';
-import {ensureButtonStyleLibrary, resolveButtonAppearance, areaButtonStyle, areaButtonIcon} from './buttonStyles.js';
-import {ensureModernStyleLibrary} from './modernStyles.js';
+import {ensureButtonStyleLibrary, offButtonStyleLibrary, resolveButtonAppearance, areaButtonStyle, areaButtonIcon} from './buttonStyles.js';
+import {ensureModernStyleLibrary, offModernStyleLibrary} from './modernStyles.js';
+import {ensureCoverStyleLibrary, offCoverStyleLibrary, resolveCoverStyle} from './coverStyles.js';
 
 
 export class EnhancedShutterCardNew extends LitElement{
@@ -26,6 +35,7 @@ export class EnhancedShutterCardNew extends LitElement{
 
     //this.isShutterConfigLoaded = false;
     this.initializeReady = false;
+    this.styleVersion = 0;
 
     this.shutterCfgs = [];
     this.areaGroups = [];       // v1.7.0: [{key,name,memberIds,members:[shutterCfg],aggregate:shutterCfg}]
@@ -54,6 +64,10 @@ export class EnhancedShutterCardNew extends LitElement{
     selectedArea: {state: true},
     coversCollapsed: {state: true},
     screenOrientation: {type: Object, state: true},
+    // v2026.09.24.183: reactive, so a style-library change (or a live draft) repaints the card. It was a
+    // plain field, and shouldUpdate() ignores an update that names no changed property — so slider and
+    // button library edits never reached a card that was already drawn.
+    styleVersion: {type: Number, state: true},
     gridPixelWidth: {type: Number, state: true},
   };
 
@@ -67,9 +81,24 @@ export class EnhancedShutterCardNew extends LitElement{
       // subscribe to the shared style libraries so lib:<slug> references resolve/update live.
       // Bump styleVersion so the child <flex-cover> elements (which resolve modern/% styles at
       // render time) actually re-render when a library arrives after first paint.
-      const onLib = () => { this.styleVersion = (this.styleVersion || 0) + 1; this.requestUpdate(); };
-      ensureButtonStyleLibrary(hass, onLib);
-      ensureModernStyleLibrary(hass, onLib);
+      // v2026.10.01.190: the two listeners are kept on the instance so disconnectedCallback can
+      // remove them (and connectedCallback put them back). Subscribing was already once-only here;
+      // what was missing is the removal, so a card taken off the page stayed alive in the libraries.
+      this._onLib = () => { this.styleVersion = (this.styleVersion || 0) + 1; };
+      // Cover Styles are resolved when the per-cover configs are BUILT (cardInitialize), not at
+      // render time like the button/slider styles. The library arrives asynchronously AFTER that
+      // first build, so a re-render alone would leave the card showing its unstyled config forever
+      // (visible as: styled correctly in the editor preview, unstyled on the live dashboard).
+      // Rebuild the configs when the library lands or changes.
+      this._onCoverLib = () => {
+        // Gate the render for the rebuild: #defAllShutterConfig() republishes shutterCfgs
+        // synchronously, so leaving the card renderable here let it paint the new covers against
+        // image dimensions that had not been measured yet (v132).
+        if (!this._hass) return;
+        this.initializeReady = false;
+        this.cardInitialize();
+      };
+      this.#subscribeLibraries(hass);
     }
     this.requestUpdate('hass', oldHass);
   }
@@ -77,18 +106,46 @@ export class EnhancedShutterCardNew extends LitElement{
     return this._hass;
   }
   async cardInitialize() {
-    // ✅ Safe to use hass here, runs exactly once
+    // v2026.09.24.176: runs can OVERLAP — the first one (built before the Cover Style library has
+    // loaded, so with no style images) is still awaiting its image measurements when the library
+    // arrives and a second run starts. If the first finished last, it published its OLD image set
+    // over the new covers: an image only the style names (e.g. slats/curtain-black.png) then measured
+    // 0x0, so a closed curtain drew with no fabric and looked fully open. The editor preview never
+    // hit this because it is created after the library has loaded. Only the newest run may publish.
+    const gen = (this._initGen = (this._initGen || 0) + 1);
     try {
       this.#defAllShutterConfig();
       //this.isShutterConfigLoaded = this.#defAllShutterConfig();
       const aggregateCfgs = this.areaGroups.map(g => g.aggregate).filter(Boolean);
-      this.escImages = new EscImages([...this.shutterCfgs, ...aggregateCfgs]);
-
+      // v2026.09.24.132: measure the new image set BEFORE publishing it. #getImageSize() returns
+      // xyPair(0,0) for an image whose dimensions have not loaded yet, and the slat geometry is
+      // derived from those numbers — so a render landing between the swap and processImages() drew
+      // zero-sized slats: a closed roller shutter looked OPEN, and a screen slat came out half
+      // width. Building into a local and assigning only once it is measured closes that window
+      // (which is why the fault was intermittent — it depended on render timing).
+      // v2026.09.24.178: a late-measured image triggers a full REBUILD, not just a redraw. Some sizes
+      // are worked out once when the card is built, so a redraw left them at the unmeasured value (a
+      // curtain drawn at part height). A rebuild measures the whole set again — the image is cached
+      // by then, so it is quick — which is what changing the style was doing by accident. At most
+      // one rebuild is queued at a time, and a failed image never triggers one, so it cannot loop.
+      const nextImages = new EscImages([...this.shutterCfgs, ...aggregateCfgs], () => {
+        if (this._lateRebuild) return;
+        this._lateRebuild = true;
+        setTimeout(() => {
+          this._lateRebuild = false;
+          if (!this._hass) return;
+          this.initializeReady = false;
+          this.cardInitialize();
+        }, 0);
+      });
       await this.resolveSubEntities();
-      await this.escImages.processImages();
+      await nextImages.processImages(this._hass);
+      if (gen !== this._initGen) return;       // superseded by a newer run — publish nothing
+      this.escImages = nextImages;
     } catch (err) {
       console.warn('Error during initialization:', err);
     } finally {
+      if (gen !== this._initGen) return;       // the newer run owns readiness and the redraw
       this.initializeReady = true;
         console_log('initialize Is Ready');
 
@@ -103,7 +160,10 @@ export class EnhancedShutterCardNew extends LitElement{
   }
   #defAllShutterConfig()
   {
-    const cardConfig = this.#buildConfig(C.CONFIG_DEFAULT,this.config);
+    // Build 3: shared resolver (constants.resolveLayoutConfig) — legacy divider mapping + preset
+    // overlay. Same function the editor uses so display and render never diverge.
+    const effectiveConfig = C.resolveLayoutConfig(this.config);
+    const cardConfig = this.#buildConfig(C.CONFIG_DEFAULT,effectiveConfig);
     this.cardCfg = new cardCfg(cardConfig);
     if (this.coversCollapsed === null) this.coversCollapsed = this.cardCfg.coversStartCollapsed();
     let id =0;
@@ -128,12 +188,21 @@ export class EnhancedShutterCardNew extends LitElement{
         const shutterConfig = this.#buildConfig(cardConfig,newSubConfig);
         const cfg = new shutterCfg(this.hass,shutterConfig);
         let counter =1;
-        if (cfg.showGroupMembers() && baseEntity && baseEntity.isGroup()){
+        // v2026.09.24.138: expansion is per-group only. The card-level show_group_members it used to
+        // fall back to was an all-or-nothing switch, replaced by this map in v118.
+        const expandMap = this.config?.[C.CONFIG_GROUP_EXPAND];
+        const wantExpand = !!(expandMap && typeof expandMap === 'object' && expandMap[subConfig.entity]);
+        if (wantExpand && baseEntity && baseEntity.isGroup()){
           const groupEntities = baseEntity.getAttributes().entity_id || [];
           const entitiesInGroup = groupEntities.filter(entityId => this.hass.states[entityId]);
           entitiesInGroup.forEach(entityId => {
+            // v2026.09.24.154: an expanded group renders its MEMBERS, not the group's own panel — so a
+            // Cover Style assigned to the group entity used to have no visible effect at all: it was
+            // applied to `cfg`, which this branch never pushes, while each member resolved its own
+            // (absent) style. Members now INHERIT the group's style, with their own assignment still
+            // winning if they have one.
             const memberOverrides = this.#presetOverridesFor(entityId);
-            const memberSub = {...memberOverrides, ...subConfig, entity: entityId, group: subConfig.entity, id: id++, [C.CONFIG_AREA_NAME_KEY]: areaNameFor(entityId)};
+            const memberSub = {...overrides, ...memberOverrides, ...subConfig, entity: entityId, group: subConfig.entity, id: id++, [C.CONFIG_AREA_NAME_KEY]: areaNameFor(entityId)};
             const memberConfig = this.#buildConfig(cardConfig,memberSub);
             if (memberConfig.name) memberConfig.name = memberConfig.name.replace("@", counter++);
             const memberCfg = new shutterCfg(this.hass,memberConfig);
@@ -154,19 +223,33 @@ export class EnhancedShutterCardNew extends LitElement{
       const aggName = this.cardCfg.groupNameFromArea() ? group.name : (cardConfig[C.CONFIG_ALL_LABEL] || C.ESC_ALL_LABEL);
       // The group/aggregate panel belongs to the area, so it inherits that area's preset
       // (image/style) — so the Group image matches the covers when a per-area preset is set.
-      const aggAreaPreset = this.#areaPresetFor(memberIds[0]);
-      const aggSub = { ...aggAreaPreset, [C.CONFIG_ENTITY_ID]: memberIds[0], [C.CONFIG_NAME]: aggName, id: id++ };
+      // The group panel belongs to the area, so it inherits that area's Cover Style and legacy
+      // presets — otherwise the "All" control would not match the covers it controls.
+      // v2026.09.24.156: resolve the aggregate's style from the group's OWN entity when it has one.
+      // It used to always use memberIds[0], which is fine for an area group (the members share the
+      // area) but wrong for an explicitly listed group: the assignment sits on the group entity while
+      // its members have none, so the "All" panel fell back to the card default (a roller shutter)
+      // while the members below it correctly showed the assigned style.
+      const aggStyleFor = group.styleFor || memberIds[0];
+      const aggCoverStyle = this.#coverStyleOverridesFor(aggStyleFor);
+      const aggSub = { ...aggCoverStyle, [C.CONFIG_ENTITY_ID]: memberIds[0], [C.CONFIG_NAME]: aggName, id: id++ };
       const aggConfig = this.#buildConfig(cardConfig, aggSub);
       const aggregate = new shutterCfg(this.hass, aggConfig);
       aggregate.setAggregate(memberIds, new haAggregateEntity(this.hass, memberIds));
 
-      this.areaGroups.push({ key: group.key, name: group.name, memberIds, members, aggregate });
+      this.areaGroups.push({ key: group.key, src: group.src, name: group.name, memberIds, members, aggregate });
     });
 
     // default the selected area/label for the area-selector layout
     if (this.areaGroups.length &&
         (this.selectedArea === null || !this.areaGroups.some(g => g.key === this.selectedArea))) {
-      this.selectedArea = this.areaGroups[0].key;
+      // The dashboard editor throws away and rebuilds its preview element on every config change,
+      // which would drop selectedArea and bounce the user back to the first area each time they
+      // touched a setting. Restore the last pick for this card shape before falling back.
+      const remembered = LAST_SELECTED_AREA.get(this.#areaMemoryKey());
+      this.selectedArea = (remembered && this.areaGroups.some(g => g.key === remembered))
+        ? remembered
+        : this.areaGroups[0].key;
     }
     return true;
   }
@@ -177,36 +260,66 @@ export class EnhancedShutterCardNew extends LitElement{
     const areaNames = this.config[C.CONFIG_AREA_NAMES] || {};
     const labelNames = this.config[C.CONFIG_LABEL_NAMES] || {};
 
+    // v2026.09.24.149: these three sources COMBINE. They used to be an if/else chain, so a card with
+    // any area or label silently ignored everything in `entities:` — yet the editor lists Areas,
+    // Labels, Covers and Groups in one combined list, which reads as "all of these are shown".
+    // Adding a Group to that list therefore appeared to do nothing.
+    const out = [];
+    const auto = (Array.isArray(areas) && areas.length) || (Array.isArray(labels) && labels.length);
+
     if (Array.isArray(areas) && areas.length){
       const { byArea } = this.#coverIndex(this.#autoFilterClasses());
-      return areas.map(a => {
+      areas.forEach(a => {
         const areaId = this.#resolveAreaId(a);
         const entityIds = (byArea.get(areaId) || []).slice().sort();
         if (!entityIds.length) this.messageManager.addMessage(`No covers found for area: [${a}]`, C.HA_ALERT_WARNING, 'General');
-        return { key: `area:${areaId || a}`, name: areaNames[a] || areaNames[areaId] || this.#areaName(areaId) || String(a), entityIds };
+        out.push({ src: a, key: `area:${areaId || a}`, name: areaNames[a] || areaNames[areaId] || this.#areaName(areaId) || String(a), entityIds });
       });
     }
     if (Array.isArray(labels) && labels.length){
       const { byLabel } = this.#coverIndex(this.#autoFilterClasses());
-      return labels.map(l => {
+      labels.forEach(l => {
         const labelId = this.#resolveLabelId(l);
         const entityIds = (byLabel.get(labelId) || []).slice().sort();
         if (!entityIds.length) this.messageManager.addMessage(`No covers found for label: [${l}]`, C.HA_ALERT_WARNING, 'General');
-        return { key: `label:${labelId || l}`, name: labelNames[l] || labelNames[labelId] || this.#labelName(labelId) || String(l), entityIds };
+        out.push({ src: l, key: `label:${labelId || l}`, name: labelNames[l] || labelNames[labelId] || this.#labelName(labelId) || String(l), entityIds });
       });
     }
-    // no auto-generation: single implicit bucket from the explicit entities list
+
     const entities = Array.isArray(this.config.entities) ? this.config.entities : [];
-    return [{ key: 'all', name: cardConfig[C.CONFIG_TITLE] || C.ESC_ALL_LABEL, entityIds: entities }];
+    if (!auto) {
+      // Classic single-card layout: one implicit bucket holding every listed cover. Unchanged.
+      return [{ key: 'all', name: cardConfig[C.CONFIG_TITLE] || C.ESC_ALL_LABEL, entityIds: entities }];
+    }
+    // Mixed with areas/labels: each explicitly listed cover or group becomes its own selectable
+    // group, so it gets a button and is reachable — one editor row, one thing on the card. Anything
+    // an area already pulled in is skipped rather than shown twice.
+    const already = new Set(out.flatMap(g => g.entityIds));
+    entities.forEach((e) => {
+      const id = (e && typeof e === 'object') ? (e[C.CONFIG_ENTITY_ID] || e.entity) : e;
+      if (!id || already.has(id)) return;
+      const name = this.hass?.states?.[id]?.attributes?.friendly_name || String(id);
+      // styleFor: the aggregate resolves its Cover Style from THIS entity, not from a member —
+      // an explicitly listed group carries the assignment, its members usually carry none (v156).
+      out.push({ src: id, key: `entity:${id}`, name, entityIds: [id], styleFor: id });
+    });
+    return out;
   }
   #autoFilterClasses(){
     const f = this.config[C.CONFIG_AUTO_FILTER] || {};
     const allow = Array.isArray(f.device_class) ? f.device_class.map(s => String(s).toLowerCase()) : null;
     const exclude = Array.isArray(f.exclude) ? f.exclude.map(s => String(s).toLowerCase()) : C.ESC_AUTO_EXCLUDE_DEVICE_CLASSES;
-    return { allow, exclude };
+    // v2026.09.24.131: ON by default — hiding an entity in HA is an explicit "keep this out of my
+    // UI", so honouring it is the correct default (matches HA's own auto dashboards). Untick the
+    // box to write `exclude_hidden: false` and pull hidden covers back in.
+    // (DISABLED entities need no flag: they have no state object, so the state guard already skips
+    // them.) Only affects Area/Label auto-discovery; an explicitly listed cover is always honoured.
+    const excludeHidden = f[C.AUTO_FILTER_EXCLUDE_HIDDEN] !== false;
+    return { allow, exclude, excludeHidden };
   }
   #passesAutoFilter(entityId, filter){
-    const { allow, exclude } = filter || this.#autoFilterClasses();
+    const { allow, exclude, excludeHidden } = filter || this.#autoFilterClasses();
+    if (excludeHidden && this.#isHiddenEntity(entityId)) return false;
     const dc = String(this.hass.states[entityId]?.attributes?.device_class || '').toLowerCase();
     if (exclude && exclude.includes(dc)) return false;
     if (allow && allow.length) return allow.includes(dc);
@@ -235,6 +348,13 @@ export class EnhancedShutterCardNew extends LitElement{
       }
     }
     return { byArea, byLabel };
+  }
+  // Hidden in HA's entity settings. hidden_by is set on the registry entry; hidden_entity on the
+  // state's attributes covers entities hidden by a parent device/integration.
+  #isHiddenEntity(entityId){
+    const e = this.hass?.entities?.[entityId];
+    if (e && e.hidden_by) return true;
+    return !!this.hass?.states?.[entityId]?.attributes?.hidden_entity;
   }
   // auto-gen skips cover group-helpers (the card already provides its own "All" aggregate)
   #isCoverGroup(entityId){
@@ -265,35 +385,96 @@ export class EnhancedShutterCardNew extends LitElement{
     const e = this.hass.entities?.[entityId];
     return e?.area_id || this.hass.devices?.[e?.device_id]?.area_id || null;
   }
-  // per-area image/style preset for a cover's area, keyed by area_id OR area name (case-insensitive)
-  #areaPresetFor(entityId){
-    const map = this.config?.[C.CONFIG_AREA_PRESETS];
-    if (!map || typeof map !== 'object') return {};
-    const areaId = this.#areaIdForEntity(entityId);
-    if (!areaId) return {};
+  // shared helper: find a map's entry for an area, keyed by area_id or case-insensitive area name
+  #areaMapEntryFor(map, areaId){
+    if (!map || typeof map !== 'object' || !areaId) return undefined;
     let hit = map[areaId];
-    if (!hit){
+    if (hit === undefined){
       const name = this.hass?.areas?.[areaId]?.name;
       if (name){
         const lower = name.toLowerCase();
         const key = Object.keys(map).find(k => k.toLowerCase() === lower);
-        hit = key ? map[key] : null;
+        hit = key ? map[key] : undefined;
       }
     }
-    return (hit && typeof hit === 'object') ? hit : {};
+    return hit;
   }
-  // per-entity image/style preset, keyed by entity_id
-  #entityPresetFor(entityId){
-    const map = this.config?.[C.CONFIG_ENTITY_PRESETS];
-    if (!map || typeof map !== 'object' || !entityId) return {};
-    const hit = map[entityId];
-    return (hit && typeof hit === 'object') ? hit : {};
+  // ---- Cover Styles (v2026.09.24.114) -------------------------------------
+  // Which Cover Style applies to a cover: the card default, then an area/label assignment, then an
+  // entity assignment (later wins). Returns '' when nothing is assigned.
+  #coverStyleRefFor(entityId){
+    const cfg = this.config || {};
+    let ref = cfg[C.CONFIG_COVER_STYLE_DEFAULT] || '';
+    // area assignment: cover_styles = { '<styleRef>': ['Area A', …] }
+    const byStyle = cfg[C.CONFIG_COVER_STYLES];
+    if (byStyle && typeof byStyle === 'object'){
+      const areaId = this.#areaIdForEntity(entityId);
+      const areaName = areaId ? (this.hass?.areas?.[areaId]?.name || '') : '';
+      // a style may be assigned to an AREA or a LABEL — match either (id or display name)
+      const labelIds = (this.hass?.entities?.[entityId]?.labels) || [];
+      const labelNames = labelIds.map(l => this.hass?.labels?.[l]?.name).filter(Boolean);
+      const wanted = [areaId, areaName, ...labelIds, ...labelNames]
+        .filter(Boolean).map(v => String(v).toLowerCase());
+      if (wanted.length){
+        for (const styleRef of Object.keys(byStyle)){
+          const areas = byStyle[styleRef];
+          if (!Array.isArray(areas)) continue;
+          if (areas.some(a => wanted.includes(String(a).toLowerCase()))) { ref = styleRef; break; }
+        }
+      }
+    }
+    // entity assignment wins over the area
+    const byEntity = cfg[C.CONFIG_COVER_STYLES_ENTITIES];
+    if (byEntity && typeof byEntity === 'object' && entityId && byEntity[entityId]) ref = byEntity[entityId];
+    return ref || '';
+  }
+  // The style's per-cover keys, ready to sit UNDER the legacy area/entity presets.
+  #coverStyleOverridesFor(entityId){
+    const ref = this.#coverStyleRefFor(entityId);
+    return ref ? resolveCoverStyle(ref) : {};
   }
   // combined per-area + per-entity overrides (entity wins over area). Applied below the
   // cover's own inline config so an explicit `entities:` entry still takes precedence.
   #presetOverridesFor(entityId){
     if (!entityId) return {};
-    return { ...this.#areaPresetFor(entityId), ...this.#entityPresetFor(entityId) };
+    // Precedence (low -> high): Cover Style -> legacy area preset -> legacy area rotation ->
+    // legacy entity preset. The caller then layers the inline `entities:` config above all of it.
+    // Cover Styles are the ONLY source of per-cover overrides now. The legacy area_presets /
+    // entity_presets / area_orientation read path is gone (v137) — migrateConfig() converts those
+    // keys on load, and warnLegacyLeftovers() reports anything it could not convert instead of
+    // letting it fail quietly. The caller still layers inline `entities:` config above this.
+    return {
+      ...this.#coverStyleOverridesFor(entityId),
+      ...this.#tdbuTopEntityFor(entityId),
+    };
+  }
+  // v2026.09.24.128: per-cover TOP-rail entity for top-down/bottom-up covers. The Cover Style says
+  // a cover IS tdbu; the card says WHICH entity drives its top rail — entity ids must never live in
+  // a shared style. Falls back to the legacy single modern_second_entity for one-cover cards.
+  #tdbuTopEntityFor(entityId){
+    const map = this.config?.[C.CONFIG_TDBU_TOP_ENTITIES];
+    if (!map || typeof map !== 'object' || Array.isArray(map)) return {};
+    const top = map[entityId];
+    return top ? { [C.CONFIG_MODERN_SECOND_ENTITY]: top } : {};
+  }
+  // Identifies "this card" across preview element instances: the source list it renders from.
+  #areaMemoryKey(){
+    const c = this.config || {};
+    return JSON.stringify([c[C.CONFIG_AREAS] || null, c[C.CONFIG_LABELS] || null, c[C.CONFIG_TITLE] || null]);
+  }
+  // Setting --ha-card-background as well as background keeps HA's own card chrome (and any theme
+  // or card-mod rule reading the variable) consistent with what the user picked.
+  #cardBgStyle(){
+    // the frame goes FIRST so an explicit Background setting still wins over a frame's own background
+    // v2026.09.30.187: Border — Theme (HA's own card border/shadow), None, or a Frame Style.
+    const mode = this.config?.[C.CONFIG_CARD_BORDER] || C.CARD_BORDER_THEME;
+    const frame = mode === C.CARD_BORDER_FRAME ? frameCss(this.config?.[C.CONFIG_CARD_FRAME])
+      : mode === C.CARD_BORDER_NONE ? '--ha-card-border-width:0;--ha-card-box-shadow:none;border:none;box-shadow:none;'
+      : '';
+    const v = String(this.config?.[C.CONFIG_CARD_BACKGROUND] || '').trim();
+    const z = Number(this.config?.[C.CONFIG_CARD_SCALE]);
+    const zoom = (Number.isFinite(z) && z > 0 && z !== 100) ? `zoom:${z / 100};` : '';   // nothing at 100%
+    return frame + (v ? `--ha-card-background:${v};background:${v};` : '') + zoom;
   }
   #resolveLabelId(input){
     if (!input) return null;
@@ -482,24 +663,40 @@ export class EnhancedShutterCardNew extends LitElement{
     if (this.cardCfg.showAreaSelector() && this.areaGroups.length){
       const group = this.areaGroups.find(g => g.key === this.selectedArea) || this.areaGroups[0];
       const isColumn = this.cardCfg.orientation() === 'vertical';
+      // v2026.09.24.85: effective rotation for the current view — the selected area's rotation
+      // (aggregate inherits the area override), else the card default. When rotated, the area
+      // button panel re-flows to a horizontal row so its text stays upright and the layout stays
+      // coherent with the rotated covers (option B).
+      const viewRotation = (group.aggregate && group.aggregate.panelRotation)
+        ? group.aggregate.panelRotation()
+        : C.PANEL_ROTATION_NORMAL;
+      const viewRotated = viewRotation === C.PANEL_ROTATION_LEFT || viewRotation === C.PANEL_ROTATION_RIGHT;
+      // v2026.09.24.92: option to physically rotate the button menu to match the covers, instead of
+      // the default re-flow to a horizontal upright row.
+      const rotateButtons = viewRotated && this.cardCfg.areaButtonsRotate();
+      const rotatedCls = (viewRotated && !rotateButtons) ? ' area-view-rotated' : '';
       const menuInline = this.cardCfg.areaMenuInline();
       const groupInline = this.cardCfg.groupInline();
-      const showAll = group.aggregate && this.cardCfg.showAllControl();
+      const showAll = group.aggregate && this.cardCfg.showGroupPanelFor(group.src);
       const sticky = this.cardCfg.groupSticky();
       const stickyCls = sticky ? (isColumn ? ' sticky-v' : ' sticky-h') : '';
       const collapsed = this.cardCfg.coversCollapsible() && this.coversCollapsed;
       const btnMode = this.cardCfg.areaButtonsWrapMode();
       const btnModeCls = btnMode === 'wrap' ? ' btns-wrap' : btnMode === 'grid' ? ' btns-grid' : '';
-      const btnTextCls = this.cardCfg.areaButtonWrap() ? ' btns-text-wrap' : '';
+      // With text-wrap OFF the labels are nowrap, so a fixed-width column clips them. Let the
+      // column size to its longest label instead (140px stays the minimum). Only for vertical
+      // menus — a horizontal row must stay shrinkable so it can wrap.
+      const btnTextCls = this.cardCfg.areaButtonWrap()
+        ? ' btns-text-wrap'
+        : (this.cardCfg.areaButtonsRow() ? '' : ' btns-fit');
       const coversMode = this.cardCfg.coversWrapMode();
       const coversCls = coversMode === 'wrap' ? ' covers-wrap' : coversMode === 'grid' ? ' covers-grid' : (isColumn ? ' scroll-v' : ' scroll-h');
       const inlineGroup = showAll && groupInline;   // group inside the covers flow
       const topbarButtons = !menuInline;            // area menu in its own top bar unless inline
       const topbarGroup = showAll && !groupInline;  // group beside the menu (top bar) unless inline
       const hasTopbar = topbarButtons || topbarGroup;
-      const anyInline = menuInline || inlineGroup;
       const buttons = html`
-        <div class="${C.ESC_CLASS_AREA_BUTTONS}${btnModeCls}${btnTextCls}">
+        <div class="${C.ESC_CLASS_AREA_BUTTONS}${btnModeCls}${btnTextCls}" style="${this.cardCfg.areaButtonsScaleStyle()}">
           ${this.areaGroups.map(g => {
             const active = g.key === group.key;
             const ref = this.cardCfg.areaButtonStyle();
@@ -510,10 +707,13 @@ export class EnhancedShutterCardNew extends LitElement{
               <button
                 class="${C.ESC_CLASS_AREA_BUTTON}${active ? ' ' + C.ESC_CLASS_AREA_BUTTON_ACTIVE : ''}"
                 style=${st || ''}
-                @click=${() => { this.selectedArea = g.key; }}
+                @click=${() => { this.selectedArea = g.key; LAST_SELECTED_AREA.set(this.#areaMemoryKey(), g.key); }}
               >${ic ? html`<ha-icon icon=${ic.icon} style=${ic.style}></ha-icon> ` : ''}${g.name}</button>`;
           })}
         </div>`;
+      const buttonsOut = rotateButtons
+        ? html`<div class="ecs-rot" data-rotation=${viewRotation}><div class="ecs-rot-inner">${buttons}</div></div>`
+        : buttons;
       const cnt = group.members.length;
       const clabel = this.cardCfg.collapseLabel() || (cnt === 1 ? 'cover' : 'covers');
       const ctext = (this.cardCfg.collapseShowCount() ? `${cnt} ` : '') + clabel;
@@ -523,7 +723,7 @@ export class EnhancedShutterCardNew extends LitElement{
       const cIconColor = this.cardCfg.collapseIconColor();
       const cIconStyle = `${cIconSize > 0 ? `--mdc-icon-size:${cIconSize}px;` : ''}${cIconColor ? `color:${cIconColor};` : ''}`;
       const toggle = this.cardCfg.coversCollapsible() ? html`
-        <button class="${C.ESC_CLASS_AREA_COVERS_TOGGLE}${this.coversCollapsed ? '' : ' open'}"
+        <button class="${C.ESC_CLASS_AREA_COVERS_TOGGLE}${this.coversCollapsed ? '' : ' open'}${this.cardCfg.collapseLine() ? '' : ' no-line'}"
           @click=${() => { this.coversCollapsed = !this.coversCollapsed; }}>
           <ha-icon icon="${cIconName}" style="${cIconStyle}"></ha-icon>
           <span>${ctext}</span>
@@ -531,24 +731,23 @@ export class EnhancedShutterCardNew extends LitElement{
       // inline area menu / group live in the covers row but are NEVER collapsed — only the members collapse
       const covers = html`
         <div class="${C.ESC_CLASS_AREA_COVERS}${coversCls}">
-          ${menuInline ? buttons : ''}
-          ${inlineGroup ? html`<div class="${C.ESC_CLASS_AREA_GROUP_INLINE} esc-cover-pad${stickyCls}">${this.#renderShutterEl(group.aggregate)}</div>` : ''}
-          ${collapsed ? '' : group.members.map((cfg, i) => html`
-            ${(anyInline || i > 0) && this.cardCfg.showCoverDividers() ? this.#renderCoverDivider(!isColumn) : ''}
-            <div class="esc-cover-pad">${this.#renderShutterEl(cfg)}</div>`)}
+          ${menuInline ? buttonsOut : ''}
+          ${inlineGroup ? html`<div class="${C.ESC_CLASS_AREA_GROUP_INLINE} esc-group-pad${stickyCls}" style="${this.cardCfg.groupScaleStyle()}">${this.#wrapGroupDividers(this.#renderShutterEl(group.aggregate))}</div>` : ''}
+          ${(collapsed || !this.cardCfg.showIndividualPanelsFor(group.src)) ? '' : group.members.map((cfg) => html`
+            <div class="esc-cover-pad" style="${this.cardCfg.coversScaleStyle()}">${this.#wrapIndDividers(this.#renderShutterEl(cfg))}</div>`)}
         </div>`;
       const body = html`
-        <div class="${C.ESC_CLASS_AREA_LAYOUT} placement-menu">
+        <div class="${C.ESC_CLASS_AREA_LAYOUT} placement-menu${rotatedCls} covers-align-${this.cardCfg.coversAlign()} btns-align-${this.cardCfg.areaButtonsAlign()}${this.cardCfg.areaButtonsRow() ? ' area-buttons-horizontal' : ''}">
           ${hasTopbar ? html`
             <div class="${C.ESC_CLASS_AREA_TOPBAR}">
-              ${topbarButtons ? buttons : ''}
-              ${topbarGroup ? html`<div class="${C.ESC_CLASS_AREA_ALL} esc-cover-pad">${this.#renderShutterEl(group.aggregate)}</div>` : ''}
+              ${topbarButtons ? buttonsOut : ''}
+              ${topbarGroup ? html`<div class="${C.ESC_CLASS_AREA_ALL} esc-group-pad" style="${this.cardCfg.groupScaleStyle()}">${this.#wrapGroupDividers(this.#renderShutterEl(group.aggregate))}</div>` : ''}
             </div>` : ''}
           <div class="${C.ESC_CLASS_AREA_MAIN}">${toggle}${covers}</div>
         </div>`;
       return html`
         ${showMessages ? html`${this.messageManager.displayGroupMessages('General')} ` : ''}
-        <ha-card .header=${this.config.title} style="${htmlParts.defStyleVarsCard()}">
+        <ha-card .header=${this.config.title} style="${htmlParts.defStyleVarsCard()}${this.#cardBgStyle()}">
           ${body}
         </ha-card>
       `;
@@ -557,20 +756,19 @@ export class EnhancedShutterCardNew extends LitElement{
     let htmlout = html`
         ${showMessages ? html`${this.messageManager.displayGroupMessages('GridSize')} ` : ''}
         ${showMessages ? html`${this.messageManager.displayGroupMessages('General')} ` : ''}
-        <ha-card .header=${this.config.title}>
+        <ha-card .header=${this.config.title} style="${this.#cardBgStyle()}">
           <div
             class="${C.ESC_CLASS_SHUTTERS}"
             style = "${htmlParts.defStyleVarsCard()}"
           >
-            ${this.shutterCfgs.map((cfg, i) => {
+            ${this.shutterCfgs.map((cfg) => {
                 // update the live states and attributes
                 return html`
-                  ${i > 0 && this.cardCfg.showCoverDividers() ? this.#renderCoverDivider(this.cardCfg.stacked() !== C.VERTICAL) : ''}
-                  <div class="${C.ESC_CLASS_SHUTTER_FLEX}">
-                    ${this.#renderShutterEl(cfg)}
+                  <div class="${C.ESC_CLASS_SHUTTER_FLEX}" style="${this.cardCfg.coversScaleStyle()}">
+                    ${this.#wrapIndDividers(this.#renderShutterEl(cfg))}
                     ${showMessages ? html`${this.messageManager.displayGroupMessages( cfg.id())} ` : ''}
                   </div>
-                  ${this.cardCfg.showCoverDividers() ? '' : shutterSeparateBlock.show()}
+                  ${this.cardCfg.anyIndDivider() ? '' : shutterSeparateBlock.show()}
                 `;
               }
             )}
@@ -586,6 +784,31 @@ export class EnhancedShutterCardNew extends LitElement{
     el.className = vertical ? 'esc-cover-divider esc-cover-divider-v' : 'esc-cover-divider esc-cover-divider-h';
     el.innerHTML = vertical ? dividerVerticalHtml(spec, {}) : dividerLineHtml(spec, {scale: 1});
     return el;
+  }
+  // v2026.09.24.90/91: wrap a panel with dividers on its enabled screen sides (Left/Right = vertical
+  // lines, Top/Bottom = horizontal lines). Screen-oriented, independent of the covers flow direction.
+  // Shares the one divider style. No-op when no side is enabled.
+  #wrapPanelDividers(inner, L, R, T, B){
+    if (!(L || R || T || B)) return inner;
+    const row = html`<div style="display:flex;flex-direction:row;align-items:stretch;">
+      ${L ? this.#renderCoverDivider(true) : ''}${inner}${R ? this.#renderCoverDivider(true) : ''}
+    </div>`;
+    if (!(T || B)) return row;
+    return html`<div style="display:flex;flex-direction:column;align-items:stretch;">
+      ${T ? this.#renderCoverDivider(false) : ''}${row}${B ? this.#renderCoverDivider(false) : ''}
+    </div>`;
+  }
+  #wrapGroupDividers(inner){
+    if (!this.cardCfg.showDividers()) return inner;
+    return this.#wrapPanelDividers(inner,
+      this.cardCfg.groupDividerLeft(), this.cardCfg.groupDividerRight(),
+      this.cardCfg.groupDividerTop(), this.cardCfg.groupDividerBottom());
+  }
+  #wrapIndDividers(inner){
+    if (!this.cardCfg.showDividers()) return inner;
+    return this.#wrapPanelDividers(inner,
+      this.cardCfg.indDividerLeft(), this.cardCfg.indDividerRight(),
+      this.cardCfg.indDividerTop(), this.cardCfg.indDividerBottom());
   }
   // single reusable <easy-cover-styler> child element, shared by both layouts (tag = HA_SHUTTER_NAME).
   // NOTE: Lit tagged-template tag names must be static literals, so this cannot interpolate
@@ -611,6 +834,9 @@ export class EnhancedShutterCardNew extends LitElement{
   }
   updated(changedProperties) {
     super.updated(changedProperties);
+    // v2026.09.24.92: size any card-level rotation wrappers (the area button bar when
+    // "Rotate Area Buttons With Panels" is on). Cover panels size their own inside their shadow DOM.
+    this.renderRoot?.querySelectorAll?.('.ecs-rot').forEach(w => sizeRotationWrapper(w));
   }
   getGrid(){
       this.getGridOptions('internal from getGrid()');
@@ -635,6 +861,15 @@ export class EnhancedShutterCardNew extends LitElement{
   }
   connectedCallback() {
     super.connectedCallback();
+    // back on the page after a disconnect: listen again, and catch up once if a library changed
+    // while this card was away (it heard nothing then)
+    if (this._libDetached) {
+      this._libDetached = false;
+      if (this._hass && this._onLib) {
+        this.#subscribeLibraries(this._hass);
+        if (libRev() !== this._libRevAtDetach) { this._onLib(); this._onCoverLib(); }
+      }
+    }
 
     //this.defGridContainer();
     //this.getGridOptionsInternal();
@@ -665,6 +900,21 @@ export class EnhancedShutterCardNew extends LitElement{
   disconnectedCallback() {
     super.disconnectedCallback();
     this.resizeObserver?.disconnect();
+    // stop listening, so a card that is gone is not kept alive (or rebuilt) by the libraries
+    [offButtonStyleLibrary, offModernStyleLibrary, offFrameLibrary].forEach(off => off(this._onLib));
+    offCoverStyleLibrary(this._onCoverLib);
+    this._libDetached = true;
+    this._libRevAtDetach = libRev();
+  }
+  // Safe to call repeatedly: the listeners are the same two functions each time, and a Set holds
+  // each once.
+  #subscribeLibraries(hass){
+    if (!this._onLib) return;
+    ensureButtonStyleLibrary(hass, this._onLib);
+    ensureModernStyleLibrary(hass, this._onLib);
+    // frames resolve at render time, so a library change only needs a re-render
+    ensureFrameLibrary(hass, this._onLib);
+    ensureCoverStyleLibrary(hass, this._onCoverLib);
   }
 
   checkOrientation(element) {
@@ -708,8 +958,12 @@ export class EnhancedShutterCardNew extends LitElement{
         flex-direction: var(--esc-card-flex-direction);
         overflow-x: auto;
         overflow-y: hidden;
-        padding: ${C.CARD_PADDING}${C.UNITY};
+        padding: var(--esc-card-pad, ${C.CARD_PADDING}${C.UNITY});
       }
+      /* v2026.09.24.92: rotation wrapper for the area button bar (Rotate Area Buttons With Panels).
+         Sized by sizeRotationWrapper() in updated(); corner-rotation keeps the math simple. */
+      .ecs-rot { position: relative; display: inline-block; }
+      .ecs-rot-inner { position: absolute; top: 0; left: 0; width: max-content; transform-origin: top left; }
       .${C.ESC_CLASS_SHUTTER_FLEX} {
         margin: 0 auto;
       }
@@ -737,9 +991,27 @@ export class EnhancedShutterCardNew extends LitElement{
       /* ---- v1.7.0 area-selector layout (ltek card design language) ---- */
       .${C.ESC_CLASS_AREA_LAYOUT} {
         display: flex;
-        gap: 12px;
-        padding: ${C.CARD_PADDING}${C.UNITY};
+        gap: var(--esc-collapse-gap, 12px);
+        padding: var(--esc-card-pad, ${C.CARD_PADDING}${C.UNITY});
       }
+      /* v2026.09.24.182: cross-panel alignment.
+         Individual Cover Panels — center-group: centred across the flow on the group panel beside
+         them; center-card: also centred along the flow within the card ("safe" keeps a scrolling row
+         from being clipped at its start). */
+      .covers-align-center-group .${C.ESC_CLASS_AREA_COVERS},
+      .covers-align-center-card .${C.ESC_CLASS_AREA_COVERS} { align-items: center; }
+      .covers-align-center-card .${C.ESC_CLASS_AREA_COVERS} { justify-content: safe center; justify-items: center; }
+      /* Area Buttons — center-covers: centred across the row on the panels beside them (the group
+         panel in the top bar, or the covers when inline); center-card: the top bar is centred in the
+         card as a unit, and a horizontal button row centres its buttons. */
+      .btns-align-center-covers > .${C.ESC_CLASS_AREA_TOPBAR},
+      .btns-align-center-card > .${C.ESC_CLASS_AREA_TOPBAR} { align-items: center; }
+      .btns-align-center-covers .${C.ESC_CLASS_AREA_COVERS} > .${C.ESC_CLASS_AREA_BUTTONS},
+      .btns-align-center-card .${C.ESC_CLASS_AREA_COVERS} > .${C.ESC_CLASS_AREA_BUTTONS},
+      .btns-align-center-covers .${C.ESC_CLASS_AREA_COVERS} > .ecs-rot,
+      .btns-align-center-card .${C.ESC_CLASS_AREA_COVERS} > .ecs-rot { align-self: center; }
+      .btns-align-center-card > .${C.ESC_CLASS_AREA_TOPBAR} { justify-content: center; }
+      .btns-align-center-card.area-buttons-horizontal .${C.ESC_CLASS_AREA_BUTTONS} { justify-content: center; }
       .${C.ESC_CLASS_AREA_LAYOUT}.placement-above { flex-direction: column; }
       .${C.ESC_CLASS_AREA_LAYOUT}.placement-left { flex-direction: row; align-items: flex-start; }
       /* buttons are FIXED (they don't scroll with the covers) and never wrap */
@@ -763,6 +1035,24 @@ export class EnhancedShutterCardNew extends LitElement{
       }
       .placement-menu > .${C.ESC_CLASS_AREA_TOPBAR} > .${C.ESC_CLASS_AREA_BUTTONS} { flex-direction: column; min-width: 140px; }
       .${C.ESC_CLASS_AREA_COVERS} > .${C.ESC_CLASS_AREA_BUTTONS} { flex-direction: column; min-width: 140px; }
+      /* v2026.09.24.88: horizontal area button bar (Area Menu Style → Top Bar). Flows the topbar
+         buttons as a wrapping row instead of a column. */
+      .${C.ESC_CLASS_AREA_LAYOUT}.area-buttons-horizontal .${C.ESC_CLASS_AREA_BUTTONS} {
+        flex-direction: row;
+        flex-wrap: wrap;
+        min-width: 0;
+        overflow: visible;
+      }
+      /* v2026.09.24.85 (option B): when the current view is rotated, re-flow the area buttons to a
+         horizontal, upright row (and let it wrap) so it stays coherent with the rotated covers
+         instead of remaining a tall column beside them. Text is NOT rotated. */
+      .${C.ESC_CLASS_AREA_LAYOUT}.area-view-rotated > .${C.ESC_CLASS_AREA_TOPBAR} { flex-direction: column; }
+      .area-view-rotated .${C.ESC_CLASS_AREA_BUTTONS} {
+        flex-direction: row;
+        flex-wrap: wrap;
+        min-width: 0;
+        overflow: visible;
+      }
       .${C.ESC_CLASS_AREA_MAIN} {
         flex: 1 1 auto;
         min-width: 0;
@@ -815,10 +1105,15 @@ export class EnhancedShutterCardNew extends LitElement{
       .${C.ESC_CLASS_AREA_COVERS}.covers-grid { display: grid; grid-template-columns: repeat(var(--esc-covers-cols, 3), minmax(0, 1fr)); }
       /* v1.35.0: button text wrap + button wrap/grid modes */
       .${C.ESC_CLASS_AREA_BUTTONS}.btns-text-wrap .${C.ESC_CLASS_AREA_BUTTON} { white-space: normal; }
+      /* v2026.09.24.125: vertical menu with nowrap labels grows to fit the longest one */
+      .placement-left > .${C.ESC_CLASS_AREA_BUTTONS}.btns-fit,
+      .placement-menu > .${C.ESC_CLASS_AREA_TOPBAR} > .${C.ESC_CLASS_AREA_BUTTONS}.btns-fit,
+      .${C.ESC_CLASS_AREA_COVERS} > .${C.ESC_CLASS_AREA_BUTTONS}.btns-fit { width: max-content; }
       .placement-above > .${C.ESC_CLASS_AREA_BUTTONS}.btns-wrap { flex-wrap: wrap; overflow-x: visible; }
       .placement-above > .${C.ESC_CLASS_AREA_BUTTONS}.btns-grid { display: grid; grid-template-columns: repeat(var(--esc-area-btn-cols, 3), minmax(0, 1fr)); overflow-x: visible; }
       /* v1.35.0: per-cover padding */
       .esc-cover-pad { padding: var(--esc-cover-pad, 0); box-sizing: border-box; }
+      .esc-group-pad { padding: var(--esc-group-pad, 0); box-sizing: border-box; }
       .${C.ESC_CLASS_SHUTTER_FLEX} { padding: var(--esc-cover-pad, 0); }
       .${C.ESC_CLASS_AREA_GROUP_INLINE} { flex: 0 0 auto; }
       .${C.ESC_CLASS_AREA_GROUP_INLINE}.sticky-h {
@@ -844,6 +1139,7 @@ export class EnhancedShutterCardNew extends LitElement{
         font-family: ${C.HA_TITLE_FONT};
         font-size: 13px;
       }
+      .${C.ESC_CLASS_AREA_COVERS_TOGGLE}.no-line { border-top: none; padding-top: 0; }
       .${C.ESC_CLASS_AREA_COVERS_TOGGLE}:hover { color: var(--primary-text-color, #e1e1e1); }
       .esc-cover-divider-v { align-self: stretch; display: flex; }
       .esc-cover-divider-h { width: 100%; }
@@ -928,7 +1224,19 @@ export class EnhancedShutterCardNew extends LitElement{
     if (!config.entities && !config.areas && !config.labels) {
       throw new Error('You need to define entities, areas, or labels');
     }
-    this.config = config;
+    const had = this.config;
+    // v2026.09.24.137: migrate here, not just in the editor. A card that is never opened for editing
+    // would otherwise keep depending on the legacy read path — which no longer exists.
+    this.config = migrateConfig(config);
+    warnLegacyLeftovers(this.config);
+    // FIX (carried forward from v106): cardCfg / shutterCfgs are built in cardInitialize(), which was
+    // guarded to run ONCE. Without this, a config change from the editor (Orientation, placements, …)
+    // never reached the renderer until a full page reload — it only appeared to work when HA happened
+    // to recreate the card element. Rebuild whenever a new config arrives after we've initialized.
+    if (had && this.initializeStarted && this._hass) {
+      this.initializeReady = false;
+      this.cardInitialize();
+    }
   }
   getCardSize() {
     const count = Array.isArray(this.config.entities) ? this.config.entities.length : 1;
@@ -1073,6 +1381,9 @@ export class EnhancedShutterCardNew extends LitElement{
     }
     //let entity = hass.states[entityId];
     return {
+      // NOTE: deliberately NO layout_preset here. The stub uses `entities:` (no areas), so seeding a
+      // preset that enables the area selector / group control produced duplicate "All" panels on a
+      // brand-new card. A new card starts unstyled; the user picks a preset from the editor.
       "entities": [{
         "entity": entityId,
         "name": "My First Easy Cover Styler Card",
@@ -1295,7 +1606,16 @@ export class EnhancedShutter extends LitElement
     if (this.cfg.showOpenCloseSliderBlock()){
       if (this.openCloseSlider) this.openCloseSlider.value = this.react_ShutterPosition; // TODO !!!!! Special ..Bug ??...
     }
+    this.#applyRotationSizing();
     this.action='cover-updated';
+  }
+
+  // v2026.09.24.84 (Option A): size the in-place rotation wrapper. CSS transforms are post-layout,
+  // so we measure the inner content's pre-transform box (offsetWidth/Height) and give .ecs-rot the
+  // swapped dimensions, then translate the corner-rotated inner back into view. Runs after render
+  // and on content resize (see startResizeObserver). No-op when not rotated.
+  #applyRotationSizing(){
+    sizeRotationWrapper(findElement(this, '.ecs-rot'));
   }
 
 
@@ -1881,29 +2201,43 @@ export class cardCfg {
     this.title(cfg[C.CONFIG_TITLE]);
     this.layout(cfg[C.CONFIG_LAYOUT]);
     this.coverGap(cfg[C.CONFIG_COVER_GAP]);
-    this.showAllControl(cfg[C.CONFIG_SHOW_ALL_CONTROL]);
+    this.#storeKey(C.CONFIG_AREA_PANELS, cfg[C.CONFIG_AREA_PANELS] || {});
+    this.#storeKey(C.CONFIG_SHOW_DIVIDERS, cfg[C.CONFIG_SHOW_DIVIDERS] !== false);
     this.coversCollapsible(cfg[C.CONFIG_COVERS_COLLAPSIBLE]);
     this.coversStartCollapsed(cfg[C.CONFIG_COVERS_START_COLLAPSED]);
     this.showCoverDividers(cfg[C.CONFIG_SHOW_COVER_DIVIDERS]);
+    this.#storeKey(C.CONFIG_GROUP_DIVIDER_LEFT, cfg[C.CONFIG_GROUP_DIVIDER_LEFT] === true);
+    this.#storeKey(C.CONFIG_GROUP_DIVIDER_RIGHT, cfg[C.CONFIG_GROUP_DIVIDER_RIGHT] === true);
+    this.#storeKey(C.CONFIG_GROUP_DIVIDER_TOP, cfg[C.CONFIG_GROUP_DIVIDER_TOP] === true);
+    this.#storeKey(C.CONFIG_GROUP_DIVIDER_BOTTOM, cfg[C.CONFIG_GROUP_DIVIDER_BOTTOM] === true);
+    this.#storeKey(C.CONFIG_IND_DIVIDER_LEFT, cfg[C.CONFIG_IND_DIVIDER_LEFT] === true);
+    this.#storeKey(C.CONFIG_IND_DIVIDER_RIGHT, cfg[C.CONFIG_IND_DIVIDER_RIGHT] === true);
+    this.#storeKey(C.CONFIG_IND_DIVIDER_TOP, cfg[C.CONFIG_IND_DIVIDER_TOP] === true);
+    this.#storeKey(C.CONFIG_IND_DIVIDER_BOTTOM, cfg[C.CONFIG_IND_DIVIDER_BOTTOM] === true);
     this.areaButtonStyle(cfg[C.CONFIG_AREA_BUTTON_STYLE]);
     this.areaButtonsDir(cfg[C.CONFIG_AREA_BUTTONS_DIR]);
     this.areaButtonsPlacement(cfg[C.CONFIG_AREA_BUTTONS_PLACEMENT]);
     [C.CONFIG_AREA_BUTTON_WRAP, C.CONFIG_AREA_BUTTONS_WRAP_MODE, C.CONFIG_AREA_BUTTONS_COLUMNS,
      C.CONFIG_COVERS_WRAP_MODE, C.CONFIG_COVERS_COLUMNS,
      C.CONFIG_COVER_PAD_TOP, C.CONFIG_COVER_PAD_RIGHT, C.CONFIG_COVER_PAD_BOTTOM, C.CONFIG_COVER_PAD_LEFT,
-     C.CONFIG_COLLAPSE_LABEL, C.CONFIG_COLLAPSE_SHOW_COUNT]
+     C.CONFIG_GROUP_PAD_TOP, C.CONFIG_GROUP_PAD_RIGHT, C.CONFIG_GROUP_PAD_BOTTOM, C.CONFIG_GROUP_PAD_LEFT,
+     C.CONFIG_COLLAPSE_LABEL, C.CONFIG_COLLAPSE_SHOW_COUNT,
+     C.CONFIG_AREA_BUTTONS_SCALE, C.CONFIG_CARD_PAD_TOP, C.CONFIG_CARD_PAD_RIGHT, C.CONFIG_CARD_PAD_BOTTOM,
+     C.CONFIG_CARD_PAD_LEFT, C.CONFIG_COVERS_ALIGN, C.CONFIG_AREA_BUTTONS_ALIGN,
+     C.CONFIG_COLLAPSE_LINE, C.CONFIG_COLLAPSE_GAP, C.CONFIG_COVERS_SCALE]
       .forEach(k => this.#storeKey(k, cfg[k]));
-    this.coversDirection(cfg[C.CONFIG_COVERS_DIRECTION]);
     this.groupWithCovers(cfg[C.CONFIG_GROUP_WITH_COVERS]);
     this.groupSticky(cfg[C.CONFIG_GROUP_STICKY]);
+    this.groupScale(cfg[C.CONFIG_GROUP_SCALE]);
     // v1.40.0: orientation + area-selector decoupled (derive from legacy layout/stacked when unset)
     const legacyAreas = cfg[C.CONFIG_LAYOUT] === C.LAYOUT_AREAS;
     // authoritative: use the explicit toggle when present; only fall back to legacy layout when it's absent
     const sasCfg = cfg[C.CONFIG_SHOW_AREA_SELECTOR];
-    this.#storeKey(C.CONFIG_SHOW_AREA_SELECTOR, sasCfg === true || (sasCfg === undefined && legacyAreas));
+    this.#storeKey(C.CONFIG_SHOW_AREA_SELECTOR, sasCfg !== false);   // v179: on unless switched off
     let orient = cfg[C.CONFIG_ORIENTATION];
     if (orient !== 'vertical' && orient !== 'horizontal') {
-      orient = legacyAreas ? (cfg[C.CONFIG_COVERS_DIRECTION] === 'column' ? 'vertical' : 'horizontal')
+      // v138: covers_direction removed, so a legacy areas layout just defaults to horizontal.
+      orient = legacyAreas ? 'horizontal'
                            : (cfg[C.CONFIG_STACKED] === C.HORIZONTAL ? 'horizontal' : 'vertical');
     }
     this.#storeKey(C.CONFIG_ORIENTATION, orient);
@@ -1912,6 +2246,8 @@ export class cardCfg {
       (cfg[C.CONFIG_GROUP_INLINE] === undefined && cfg[C.CONFIG_GROUP_PLACEMENT] === C.GROUP_PLACE_COVERS);
     this.#storeKey(C.CONFIG_GROUP_INLINE, gi);
     this.#storeKey(C.CONFIG_AREA_MENU_INLINE, cfg[C.CONFIG_AREA_MENU_INLINE] === true);
+    this.#storeKey(C.CONFIG_AREA_BUTTONS_ROW, cfg[C.CONFIG_AREA_BUTTONS_ROW] === true);
+    this.#storeKey(C.CONFIG_AREA_BUTTONS_ROTATE, cfg[C.CONFIG_AREA_BUTTONS_ROTATE] === true);
     this.#storeKey(C.CONFIG_GROUP_NAME_FROM_AREA, cfg[C.CONFIG_GROUP_NAME_FROM_AREA] === true);
     // store all divider_* keys so coverDividerSpec() can read them back
     [C.CONFIG_DIVIDER_STYLE, C.CONFIG_DIVIDER_COLOR, C.CONFIG_DIVIDER_THICKNESS, C.CONFIG_DIVIDER_LENGTH,
@@ -1950,10 +2286,32 @@ export class cardCfg {
   collapseIcon(value = null){ return this.#getCfg(C.CONFIG_COLLAPSE_ICON, value); }
   collapseIconSize(value = null){ return this.#getCfg(C.CONFIG_COLLAPSE_ICON_SIZE, value); }
   collapseIconColor(value = null){ return this.#getCfg(C.CONFIG_COLLAPSE_ICON_COLOR, value); }
-  showAllControl(value = null){ return this.#getCfg(C.CONFIG_SHOW_ALL_CONTROL, value); }
+  // v2026.09.24.179: which panels one area row shows — 'both' (default), 'group' or 'individual'.
+  // Matched on the row's config value, case-insensitively, the same way style assignments are.
+  areaPanels(src){
+    const m = this.#getCfg(C.CONFIG_AREA_PANELS) || {};
+    if (src === undefined || src === null) return C.AREA_PANELS_BOTH;
+    const want = String(src).toLowerCase();
+    const k = Object.keys(m).find(x => String(x).toLowerCase() === want);
+    const v = k === undefined ? '' : m[k];
+    return (v === C.AREA_PANELS_GROUP || v === C.AREA_PANELS_INDIVIDUAL) ? v : C.AREA_PANELS_BOTH;
+  }
+  showGroupPanelFor(src){ return this.areaPanels(src) !== C.AREA_PANELS_INDIVIDUAL; }
+  showIndividualPanelsFor(src){ return this.areaPanels(src) !== C.AREA_PANELS_GROUP; }
+  showDividers(){ const v = this.#getCfg(C.CONFIG_SHOW_DIVIDERS); return v === undefined ? true : !!v; }
   coversCollapsible(value = null){ return this.#getCfg(C.CONFIG_COVERS_COLLAPSIBLE, value); }
   coversStartCollapsed(value = null){ return this.#getCfg(C.CONFIG_COVERS_START_COLLAPSED, value); }
   showCoverDividers(value = null){ return this.#getCfg(C.CONFIG_SHOW_COVER_DIVIDERS, value); }
+  groupDividerLeft(){ return !!this.#getCfg(C.CONFIG_GROUP_DIVIDER_LEFT); }
+  groupDividerRight(){ return !!this.#getCfg(C.CONFIG_GROUP_DIVIDER_RIGHT); }
+  groupDividerTop(){ return !!this.#getCfg(C.CONFIG_GROUP_DIVIDER_TOP); }
+  groupDividerBottom(){ return !!this.#getCfg(C.CONFIG_GROUP_DIVIDER_BOTTOM); }
+  anyGroupDivider(){ return this.groupDividerLeft() || this.groupDividerRight() || this.groupDividerTop() || this.groupDividerBottom(); }
+  indDividerLeft(){ return !!this.#getCfg(C.CONFIG_IND_DIVIDER_LEFT); }
+  indDividerRight(){ return !!this.#getCfg(C.CONFIG_IND_DIVIDER_RIGHT); }
+  indDividerTop(){ return !!this.#getCfg(C.CONFIG_IND_DIVIDER_TOP); }
+  indDividerBottom(){ return !!this.#getCfg(C.CONFIG_IND_DIVIDER_BOTTOM); }
+  anyIndDivider(){ return this.indDividerLeft() || this.indDividerRight() || this.indDividerTop() || this.indDividerBottom(); }
   areaButtonStyle(value = null){ return this.#getCfg(C.CONFIG_AREA_BUTTON_STYLE, value); }
   areaButtonsDir(value = null){ return this.#getCfg(C.CONFIG_AREA_BUTTONS_DIR, value); }
   areaButtonsPlacement(value = null){ return this.#getCfg(C.CONFIG_AREA_BUTTONS_PLACEMENT, value); }
@@ -1966,13 +2324,47 @@ export class cardCfg {
     return [this.#getCfg(C.CONFIG_COVER_PAD_TOP), this.#getCfg(C.CONFIG_COVER_PAD_RIGHT),
             this.#getCfg(C.CONFIG_COVER_PAD_BOTTOM), this.#getCfg(C.CONFIG_COVER_PAD_LEFT)].map(v => Number(v) || 0);
   }
-  coversDirection(value = null){ return this.#getCfg(C.CONFIG_COVERS_DIRECTION, value); }
+  groupPad(){
+    return [this.#getCfg(C.CONFIG_GROUP_PAD_TOP), this.#getCfg(C.CONFIG_GROUP_PAD_RIGHT),
+            this.#getCfg(C.CONFIG_GROUP_PAD_BOTTOM), this.#getCfg(C.CONFIG_GROUP_PAD_LEFT)].map(v => Number(v) || 0);
+  }
   groupWithCovers(value = null){ return this.#getCfg(C.CONFIG_GROUP_WITH_COVERS, value); }
   groupSticky(value = null){ return this.#getCfg(C.CONFIG_GROUP_STICKY, value); }
+  groupScale(value = null){ return this.#getCfg(C.CONFIG_GROUP_SCALE, value); }
+  // inline style for the group panel wrapper; empty at 100% so configs and DOM stay byte-stable
+  // v2026.09.30.187: the same zoom on every individual panel, so the set scales together whatever
+  // the number of covers (gaps between panels stay fixed)
+  coversScaleStyle(){
+    const n = Number(this.#getCfg(C.CONFIG_COVERS_SCALE));
+    return (Number.isFinite(n) && n > 0 && n !== 100) ? `zoom:${n / 100};` : '';
+  }
+  areaButtonsScaleStyle(){
+    const n = Number(this.#getCfg(C.CONFIG_AREA_BUTTONS_SCALE));
+    return (Number.isFinite(n) && n > 0 && n !== 100) ? `zoom:${n / 100};` : '';
+  }
+  // unset side = the card's built-in padding, so an untouched card looks exactly as before
+  cardPad(){
+    return [C.CONFIG_CARD_PAD_TOP, C.CONFIG_CARD_PAD_RIGHT, C.CONFIG_CARD_PAD_BOTTOM, C.CONFIG_CARD_PAD_LEFT]
+      .map(k => {
+        const raw = this.#getCfg(k);
+        const v = Number(raw);
+        return (raw === undefined || raw === null || raw === '' || !Number.isFinite(v) || v < 0) ? C.CARD_PADDING : v;
+      });
+  }
+  collapseLine(){ return this.#getCfg(C.CONFIG_COLLAPSE_LINE) !== false; }
+  collapseGap(){ const v = Number(this.#getCfg(C.CONFIG_COLLAPSE_GAP)); return Number.isFinite(v) && v >= 0 ? v : 12; }
+  coversAlign(){ const v = this.#getCfg(C.CONFIG_COVERS_ALIGN); return v === 'center-group' || v === 'center-card' ? v : 'start'; }
+  areaButtonsAlign(){ const v = this.#getCfg(C.CONFIG_AREA_BUTTONS_ALIGN); return v === 'center-covers' || v === 'center-card' ? v : 'start'; }
+  groupScaleStyle(){
+    const n = Number(this.groupScale());
+    return (Number.isFinite(n) && n > 0 && n !== 100) ? `zoom:${n / 100};` : '';
+  }
   showAreaSelector(){ return !!this.#getCfg(C.CONFIG_SHOW_AREA_SELECTOR); }
   orientation(){ return this.#getCfg(C.CONFIG_ORIENTATION) || 'vertical'; }
   groupPlacement(){ return this.#getCfg(C.CONFIG_GROUP_PLACEMENT) || C.GROUP_PLACE_MENU; }
   areaMenuInline(){ return !!this.#getCfg(C.CONFIG_AREA_MENU_INLINE); }
+  areaButtonsRow(){ return !!this.#getCfg(C.CONFIG_AREA_BUTTONS_ROW); }
+  areaButtonsRotate(){ return !!this.#getCfg(C.CONFIG_AREA_BUTTONS_ROTATE); }
   groupInline(){ return !!this.#getCfg(C.CONFIG_GROUP_INLINE); }
   groupNameFromArea(){ return !!this.#getCfg(C.CONFIG_GROUP_NAME_FROM_AREA); }
   collapseLabel(){ return this.#getCfg(C.CONFIG_COLLAPSE_LABEL) || ''; }
@@ -2041,7 +2433,6 @@ export class shutterCfg {
     this.#setLocalize(hass.localize);
     this.setCoverEntity(hass,entityId);
 
-    this.showGroupMembers(escConfig[C.CONFIG_SHOW_GROUP_MEMBERS]);
 
     this.imageMap(escConfig[C.CONFIG_IMAGE_MAP]);
 
@@ -2050,6 +2441,7 @@ export class shutterCfg {
     this.shutterSlatImage(escConfig[C.CONFIG_SHUTTER_SLAT_IMAGE]);
     this.shutterBottomImage(escConfig[C.CONFIG_SHUTTER_BOTTOM_IMAGE]);
     this.coverVisual(escConfig[C.CONFIG_COVER_VISUAL]);
+    this.panelRotation(escConfig[C.CONFIG_PANEL_ROTATION]);
     this.modernStyle(escConfig[C.CONFIG_MODERN_STYLE]);
     this.modernValuePos(escConfig[C.CONFIG_MODERN_VALUE_POS]);
     this.positionPlacement(escConfig[C.CONFIG_POSITION_PLACEMENT]);
@@ -2123,19 +2515,18 @@ export class shutterCfg {
 
     this.iconsPosition(escConfig[C.CONFIG_ICONS_POSITION]);
 
-    this.openingPosition(escConfig[C.CONFIG_OPENING_POSITION]);
 
-    this.inlineHeader(escConfig[C.CONFIG_INLINE_HEADER]);
-    this.headerAlign(escConfig[C.CONFIG_HEADER_ALIGN]);
-    this.headerOrder(escConfig[C.CONFIG_HEADER_ORDER]);
-    this.headerGap(escConfig[C.CONFIG_HEADER_GAP]);
+    this.headerOnCover(escConfig[C.CONFIG_HEADER_ON_COVER]);
+    this.nameAlign(escConfig[C.CONFIG_NAME_ALIGN]);
+    this.posAlign(escConfig[C.CONFIG_POS_ALIGN]);
+    this.nameCoverGap(escConfig[C.CONFIG_NAME_COVER_GAP]);
+    this.posCoverGap(escConfig[C.CONFIG_POS_COVER_GAP]);
 
     this.alwaysPercentage(!!escConfig[C.CONFIG_ALWAYS_PCT]);
     this.disableEndButtons(!!escConfig[C.CONFIG_DISABLE_END_BUTTONS]);
     this.pickerOverlapPx(C.ESC_PICKER_OVERLAP_PX);
 
     this.showName(escConfig[C.CONFIG_SHOW_NAME]);
-    this.showOpening(escConfig[C.CONFIG_SHOW_OPENING]);
     this.showTiltButtonBlock(escConfig[C.CONFIG_SHOW_TILT_BUTTONS]);
     this.showStandardButtons(escConfig[C.CONFIG_SHOW_STANDARD_BUTTONS]);
     this.showPartialOpenButtons(escConfig[C.CONFIG_SHOW_PARTIAL_OPEN_BUTTONS]);
@@ -2163,14 +2554,15 @@ export class shutterCfg {
     this.nameTextSize(escConfig[C.CONFIG_NAME_TEXT_SIZE]);
     this.nameTextWeight(escConfig[C.CONFIG_NAME_TEXT_WEIGHT]);
     this.nameTextColor(escConfig[C.CONFIG_NAME_TEXT_COLOR]);
-    this.positionTextSize(escConfig[C.CONFIG_POSITION_TEXT_SIZE]);
-    this.positionTextColor(escConfig[C.CONFIG_POSITION_TEXT_COLOR]);
-    this.positionTextWeight(escConfig[C.CONFIG_POSITION_TEXT_WEIGHT]);
-    this.positionBackground(escConfig[C.CONFIG_POSITION_BACKGROUND]);
-    this.controlsGap(escConfig[C.CONFIG_CONTROLS_GAP]);
     this.headerImageGap(escConfig[C.CONFIG_HEADER_IMAGE_GAP]);
-    this.controlButtonPadding(escConfig[C.CONFIG_CONTROLS_BUTTON_PAD]);
-    this.controlButtonMargin(escConfig[C.CONFIG_CONTROLS_BUTTON_MARGIN]);
+    [C.CONFIG_BUTTON_UP_HIDE, C.CONFIG_BUTTON_DOWN_HIDE, C.CONFIG_BUTTON_STOP_HIDE,
+     C.CONFIG_BUTTON_UP_STATE_COLOR, C.CONFIG_BUTTON_DOWN_STATE_COLOR, C.CONFIG_BUTTON_STOP_STATE_COLOR,
+     C.CONFIG_CONTROLS_BUTTON_GAP, C.CONFIG_CONTROLS_PAD_TOP, C.CONFIG_CONTROLS_PAD_RIGHT,
+     C.CONFIG_CONTROLS_PAD_BOTTOM, C.CONFIG_CONTROLS_PAD_LEFT,
+     C.CONFIG_PCT_BUTTON_GAP, C.CONFIG_PCT_PAD_TOP, C.CONFIG_PCT_PAD_RIGHT,
+     C.CONFIG_PCT_PAD_BOTTOM, C.CONFIG_PCT_PAD_LEFT,
+     C.CONFIG_LC_SHOW_TIME, C.CONFIG_LC_SHOW_AGO, C.CONFIG_LC_PLACEMENT, C.CONFIG_LC_ALIGN,
+     C.CONFIG_LC_SIZE, C.CONFIG_LC_WEIGHT, C.CONFIG_LC_COLOR, C.CONFIG_LC_COVER_GAP].forEach((k) => this.#getCfg(k, escConfig[k]));
     [C.CONFIG_CONTROL_ICON_COLOR, C.CONFIG_ICON_UP, C.CONFIG_ICON_DOWN, C.CONFIG_ICON_STOP, C.CONFIG_ICON_PARTIAL,
      C.CONFIG_ICON_TILT_UP, C.CONFIG_ICON_TILT_DOWN, C.CONFIG_PCT_ICON_COLOR, C.CONFIG_PCT_BUTTON_BG,
      C.CONFIG_PCT_BUTTON_BORDER, C.CONFIG_PCT_BUTTON_COLOR, C.CONFIG_PCT_BUTTON_WEIGHT, C.CONFIG_PCT_BUTTON_SIZE,
@@ -2337,9 +2729,6 @@ export class shutterCfg {
   showName(value = null){
     return this.#getCfg(C.CONFIG_SHOW_NAME,value);
   }
-  showOpening(value = null){
-    return this.#getCfg(C.CONFIG_SHOW_OPENING,value);
-   }
   showTiltButtonBlock(value = null){
     return this.#getCfg(C.CONFIG_SHOW_TILT_BUTTONS,value);
   }
@@ -2396,17 +2785,88 @@ export class shutterCfg {
   panelPosColor(value = null){ return this.#getCfg(C.CONFIG_PANEL_POS_COLOR, value); }
   panelPosEnd(value = null){ return this.#getCfg(C.CONFIG_PANEL_POS_END, value); }
   // the PANEL Position Value placement (only when panelPosShow); legacy modern_value_position seeds it
+  // ---- Last Changed readout (v2026.09.24.172) --------------------------------------------
+  lcActive(){ return this.#getCfg(C.CONFIG_LC_SHOW_TIME) === true || this.#getCfg(C.CONFIG_LC_SHOW_AGO) === true; }
+  effectiveLcPlacement(){
+    if (!this.lcActive()) return 'default';
+    const p = String(this.#getCfg(C.CONFIG_LC_PLACEMENT) || '');
+    return (p && p !== 'default') ? p : 'bottom';
+  }
+  lcAlign(){ return this.#normAlign(this.#getCfg(C.CONFIG_LC_ALIGN)); }
+  // Same formats as the Entity card: clock "12:02 PM", elapsed "3 h 12 m" (seconds under a minute).
+  lcText(){
+    // The group ("All") panel reports the MOST RECENT change among its members; a single cover
+    // reports its own. Reads hass.states directly (haEntity does not keep last_changed).
+    const ids = this.getTargetEntities();   // the members for a group panel, else this cover
+    let d = null;
+    ids.forEach((id) => {
+      const iso = typeof id === 'string' ? this.hass?.states?.[id]?.last_changed : null;
+      const t = iso ? new Date(iso) : null;
+      if (t && !Number.isNaN(t.getTime()) && (!d || t > d)) d = t;
+    });
+    if (!d) return '';
+    const parts = [];
+    if (this.#getCfg(C.CONFIG_LC_SHOW_TIME) === true) {
+      let h = d.getHours(); const m = d.getMinutes();
+      const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12; if (h === 0) h = 12;
+      parts.push(`${h}:${m < 10 ? '0' + m : m} ${ap}`);
+    }
+    if (this.#getCfg(C.CONFIG_LC_SHOW_AGO) === true) {
+      const sec = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
+      const hh = Math.floor(sec / 3600), mm = Math.floor((sec % 3600) / 60);
+      parts.push(sec < 60 ? `${sec} s` : (hh > 0 && mm > 0) ? `${hh} h ${mm} m` : hh > 0 ? `${hh} h` : `${mm} m`);
+    }
+    return parts.join(' \u00b7 ');
+  }
+  lcStyle(){
+    const parts = [];
+    const sz = Number(this.#getCfg(C.CONFIG_LC_SIZE)); if (sz > 0) parts.push(`font-size:${sz}px`);
+    const w = this.#getCfg(C.CONFIG_LC_WEIGHT); if (w) parts.push(`font-weight:${w}`);
+    const col = this.#getCfg(C.CONFIG_LC_COLOR); if (col) parts.push(`color:${col}`);
+    const g = Number(this.#getCfg(C.CONFIG_LC_COVER_GAP));
+    if (g > 0) {
+      const place = this.effectiveLcPlacement();
+      if (place === C.TOP) parts.push(`margin-bottom:${g}px`);
+      else if (place === C.BOTTOM) parts.push(`margin-top:${g}px`);
+      else if (place === C.LEFT) parts.push(`margin-right:${g}px`);
+      else if (place === C.RIGHT) parts.push(`margin-left:${g}px`);
+    }
+    return parts.length ? parts.join(';') + ';' : '';
+  }
   effectivePositionPlacement(){
     if (this.panelPosShow() !== true) return 'default';
     const p = this.positionPlacement();
     return (p && p !== 'default') ? p : 'bottom';
   }
   // inline text style for the panel position value element
+  // v2026.09.24.152: the NAME's counterpart to panelPosStyle(). Only the gap needs emitting here —
+  // size/weight/colour already reach the name label through --esc-name-* vars.
+  nameSideStyle(){
+    const parts = [];
+    const g = Number(this.nameCoverGap());
+    if (g > 0) {
+      const place = String(this.namePosition() || '').toLowerCase();
+      if (place === C.LEFT) parts.push(`margin-right:${g}px`);
+      else if (place === C.RIGHT) parts.push(`margin-left:${g}px`);
+    }
+    return parts.length ? parts.join(';') + ';' : '';
+  }
   panelPosStyle(){
     const parts = [];
     const sz = Number(this.panelPosSize()); if (sz > 0) parts.push(`font-size:${sz}px`);
     const w = this.panelPosWeight(); if (w) parts.push(`font-weight:${w}`);
     const c = this.panelPosColor(); if (c) parts.push(`color:${c}`);
+    // v151: the gap goes on the side FACING the cover, which depends on where the readout sits.
+    // Only meaningful for the four side placements — a handle-attached readout is absolutely
+    // positioned against the bar, so a margin there would do nothing.
+    const g = Number(this.posCoverGap());
+    if (g > 0) {
+      const place = this.effectivePositionPlacement ? this.effectivePositionPlacement() : 'default';
+      if (place === C.TOP) parts.push(`margin-bottom:${g}px`);
+      else if (place === C.BOTTOM) parts.push(`margin-top:${g}px`);
+      else if (place === C.LEFT) parts.push(`margin-right:${g}px`);
+      else if (place === C.RIGHT) parts.push(`margin-left:${g}px`);
+    }
     return parts.length ? parts.join(';') + ';' : '';
   }
   modernTravel(value = null){ return this.#getCfg(C.CONFIG_MODERN_TRAVEL, value); }
@@ -2474,14 +2934,16 @@ export class shutterCfg {
     if (this.#isAggregate && this.#targetEntities?.length) return this.#targetEntities;
     return [this.entityId()];
   }
-  showGroupMembers(value = null){
-    return this.#getCfg(C.CONFIG_SHOW_GROUP_MEMBERS,value);
-  }
   imageMap(value = null){
     return this.#getCfg(C.CONFIG_IMAGE_MAP,value);
   }
   windowImage(value = null){
     return this.#getCfg(C.CONFIG_WINDOW_IMAGE,value);
+  }
+  // v2026.09.24.84: resolved per-cover — card default, overridden per-area via
+  // #areaOrientationFor() in EnhancedShutterCardNew before this shutterCfg is built.
+  panelRotation(value = null){
+    return this.#getCfg(C.CONFIG_PANEL_ROTATION,value);
   }
   viewImage(value = null){
     return this.#getCfg(C.CONFIG_VIEW_IMAGE,value);
@@ -2500,18 +2962,40 @@ export class shutterCfg {
   nameTextSize(value = null){ return this.#getCfg(C.CONFIG_NAME_TEXT_SIZE, value); }
   nameTextWeight(value = null){ return this.#getCfg(C.CONFIG_NAME_TEXT_WEIGHT, value); }
   nameTextColor(value = null){ return this.#getCfg(C.CONFIG_NAME_TEXT_COLOR, value); }
-  positionTextSize(value = null){ return this.#getCfg(C.CONFIG_POSITION_TEXT_SIZE, value); }
-  positionTextColor(value = null){ return this.#getCfg(C.CONFIG_POSITION_TEXT_COLOR, value); }
-  positionTextWeight(value = null){ return this.#getCfg(C.CONFIG_POSITION_TEXT_WEIGHT, value); }
-  positionBackground(value = null){ return this.#getCfg(C.CONFIG_POSITION_BACKGROUND, value); }
-  controlsGap(value = null){ return this.#getCfg(C.CONFIG_CONTROLS_GAP, value); }
   headerImageGap(value = null){ return this.#getCfg(C.CONFIG_HEADER_IMAGE_GAP, value); }
-  controlButtonPadding(value = null){ return this.#getCfg(C.CONFIG_CONTROLS_BUTTON_PAD, value); }
-  controlButtonMargin(value = null){ return this.#getCfg(C.CONFIG_CONTROLS_BUTTON_MARGIN, value); }
-  // visual box for up/stop/down: icon size + user padding (default 6 ≈ the built-in 36/24 box)
-  controlButtonBoxPx(){
-    const pad = Number(this.controlButtonPadding());
-    return this.iconSize() + 2 * (Number.isFinite(pad) ? pad : 6);
+  // v2026.09.24.166: the button box is fixed at the old default (icon + 2x6). Spacing is now the gap
+  // BETWEEN buttons plus padding on each side of the group — see controlsSpacingVars().
+  controlButtonBoxPx(){ return this.iconSize() + 12; }
+  controlsSpacingVars(){
+    const n = (k) => { const v = Number(this.#getCfg(k)); return Number.isFinite(v) && v > 0 ? v : 0; };
+    let out = '';
+    const gap = n(C.CONFIG_CONTROLS_BUTTON_GAP);
+    if (gap) out += `--esc-controls-btn-gap:${gap}px;`;
+    out += `--esc-controls-pad:${n(C.CONFIG_CONTROLS_PAD_TOP)}px ${n(C.CONFIG_CONTROLS_PAD_RIGHT)}px ${n(C.CONFIG_CONTROLS_PAD_BOTTOM)}px ${n(C.CONFIG_CONTROLS_PAD_LEFT)}px;`;
+    // position buttons: gap is emitted even when 0, since the CSS fallback is the old 4px
+    const pg = Number(this.#getCfg(C.CONFIG_PCT_BUTTON_GAP));
+    out += `--esc-pct-btn-gap:${Number.isFinite(pg) && pg >= 0 ? pg : 4}px;`;
+    out += `--esc-pct-pad:${n(C.CONFIG_PCT_PAD_TOP)}px ${n(C.CONFIG_PCT_PAD_RIGHT)}px ${n(C.CONFIG_PCT_PAD_BOTTOM)}px ${n(C.CONFIG_PCT_PAD_LEFT)}px;`;
+    return out;
+  }
+  // v2026.09.24.166: what a movement button does in the current state.
+  //   'show' | { mode: 'recolor', color } | 'hide'
+  // `which` is 'up' | 'down' | 'stop'. up/down go through the same invert mapping the state lists
+  // always used, so the flag and colour follow the button the user actually sees.
+  buttonVisibility(which){
+    let states, hideKey, colorKey;
+    if (which === 'stop') {
+      states = this.buttonStopHideStates(); hideKey = C.CONFIG_BUTTON_STOP_HIDE; colorKey = C.CONFIG_BUTTON_STOP_STATE_COLOR;
+    } else {
+      const eff = this.applyInvertForButtonOpenCloseHideStates(which === 'up' ? C.UP : C.DOWN);
+      states = eff === C.UP ? this.buttonOpenHideStates() : this.buttonCloseHideStates();
+      hideKey = eff === C.UP ? C.CONFIG_BUTTON_UP_HIDE : C.CONFIG_BUTTON_DOWN_HIDE;
+      colorKey = eff === C.UP ? C.CONFIG_BUTTON_UP_STATE_COLOR : C.CONFIG_BUTTON_DOWN_STATE_COLOR;
+    }
+    if (!Array.isArray(states) || !states.includes(this.positionToState())) return 'show';
+    if (this.#getCfg(hideKey) === true) return 'hide';
+    // default recolour: the theme's disabled-text colour, which reads as "inactive" in any theme
+    return { mode: 'recolor', color: this.#getCfg(colorKey) || 'var(--disabled-text-color)' };
   }
   // emit only the vars that are actually set, so unconfigured text keeps its default look
   fontStyleVars(){
@@ -2522,19 +3006,12 @@ export class shutterCfg {
     if (weight) out += `--esc-name-font-weight:${weight};`;
     const color = this.nameTextColor();
     if (color) out += `--esc-name-color:${color};`;
-    const psize = Number(this.positionTextSize());
-    if (psize > 0) out += `--esc-position-font-size:${psize}px;`;
-    const pcolor = this.positionTextColor();
-    if (pcolor) out += `--esc-position-color:${pcolor};`;
-    const pweight = this.positionTextWeight();
-    if (pweight) out += `--esc-position-weight:${pweight};`;
-    if (this.positionBackground()) out += `--esc-position-bg:var(--secondary-background-color);`;
-    const cgap = Number(this.controlsGap());
-    if (cgap > 0) out += `--esc-controls-gap:${cgap}px;`;
+    out += this.controlsSpacingVars();
     const higap = Number(this.headerImageGap());
     if (higap > 0) out += `--esc-header-image-gap:${higap}px;`;
-    const bmargin = Number(this.controlButtonMargin());
-    if (bmargin > 0) out += `--esc-controls-btn-margin:${bmargin}px;`;
+    const ncgap = Number(this.nameCoverGap());
+    if (ncgap > 0) out += `--esc-name-cover-gap:${ncgap}px;`;
+
     const cic = this.controlIconColor(); if (cic) out += `--esc-control-icon-color:${cic};`;
     const pic = this.pctIconColor(); if (pic) out += `--esc-pct-icon-color:${pic};`;
     const pbg = this.pctButtonBg(); if (pbg) out += `--esc-pct-btn-bg:${pbg};`;
@@ -2698,20 +3175,19 @@ export class shutterCfg {
   namePosition(value = null){
     return this.#getCfg(C.CONFIG_NAME_POSITION,value);
   }
-  inlineHeader(value = null){
-    return this.#getCfg(C.CONFIG_INLINE_HEADER,value);
-  }
-  headerAlign(value = null){ return this.#getCfg(C.CONFIG_HEADER_ALIGN, value); }
-  headerOrder(value = null){ return this.#getCfg(C.CONFIG_HEADER_ORDER, value); }
-  headerGap(value = null){ return this.#getCfg(C.CONFIG_HEADER_GAP, value); }
-  headerAlignCss(){ return C.HEADER_ALIGN_MAP[this.headerAlign()] || 'center'; }
-  openingPosition(value = null){
-    if (value !== null  && this.#getCfg(C.CONFIG_OPENING_POSITION,value) === null)
-    {
-      value = this.#getCfg(C.CONFIG_NAME_POSITION);
-    }
-    return this.#getCfg(C.CONFIG_OPENING_POSITION,value);
-  }
+  headerOnCover(value = null){ return this.#getCfg(C.CONFIG_HEADER_ON_COVER, value); }
+  // v2026.09.24.154: cross-axis alignment (start|center|end) of the Name / Position Readout
+  nameAlign(value = null){ return this.#normAlign(this.#getCfg(C.CONFIG_NAME_ALIGN, value)); }
+  posAlign(value = null){ return this.#normAlign(this.#getCfg(C.CONFIG_POS_ALIGN, value)); }
+  #normAlign(v){ return (v === C.ALIGN_START || v === C.ALIGN_END) ? v : C.ALIGN_CENTER; }
+  alignFlex(align){ return C.ALIGN_FLEX_MAP[align] || 'center'; }
+  // header-row cell the name occupies when it is NOT anchored to the cover
+  nameAlignCell(){ const a = this.nameAlign(); return a === C.ALIGN_START ? 'left' : (a === C.ALIGN_END ? 'right' : 'center'); }
+  // top/bottom Name + Readout render inside the cover's own column (see htmlBlockMiddle). Only in a
+  // row layout: with the buttons above/below, the cover is centred in the panel already.
+  coverAnchored(){ return this.headerOnCover() === true && this.buttonGroupInRow() && this.showWindow() !== false; }
+  nameCoverGap(value = null){ return this.#getCfg(C.CONFIG_NAME_COVER_GAP, value); }
+  posCoverGap(value = null){ return this.#getCfg(C.CONFIG_POS_COVER_GAP, value); }
   iconsPosition(value = null){
     return this.#getCfg(C.CONFIG_ICONS_POSITION,value);
   }
@@ -3258,10 +3734,14 @@ export class htmlCard{
     const cardCfg = this.enhancedShutterCard.cardCfg;
     const gap = Number(cardCfg?.coverGap?.() || 0);
     const btnDir = cardCfg?.areaButtonsDir?.() === 'row' ? 'row' : 'column';
-    const coversDir = cardCfg?.coversDirection?.() === 'column' ? 'column' : 'row';
+    // The covers flow direction follows the Orientation selector. (v138: the legacy
+    // `covers_direction` key is gone — it had no editor control and silently outranked Orientation,
+    // which is what made Orientation look broken before v126.)
+    const coversDir = cardCfg?.orientation?.() === 'vertical' ? 'column' : 'row';
     const btnCols = Number(cardCfg?.areaButtonsColumns?.() || 0);
     const covCols = Number(cardCfg?.coversColumns?.() || 0);
     const [pt, pr, pb, pl] = cardCfg?.coverPad?.() || [0, 0, 0, 0];
+    const [gt, gr, gb, gl] = cardCfg?.groupPad?.() || [0, 0, 0, 0];
     return `
       --esc-card-flex-direction: ${this.enhancedShutterCard.getCardFlexDirection()};
       ${gap > 0 ? `--esc-cover-gap:${gap}px;` : ''}
@@ -3270,6 +3750,9 @@ export class htmlCard{
       ${btnCols > 0 ? `--esc-area-btn-cols:${btnCols};` : ''}
       ${covCols > 0 ? `--esc-covers-cols:${covCols};` : ''}
       ${(pt || pr || pb || pl) ? `--esc-cover-pad:${pt}px ${pr}px ${pb}px ${pl}px;` : ''}
+      ${(gt || gr || gb || gl) ? `--esc-group-pad:${gt}px ${gr}px ${gb}px ${gl}px;` : ''}
+      ${cardCfg?.collapseGap ? `--esc-collapse-gap:${cardCfg.collapseGap()}px;` : ''}
+      ${cardCfg?.cardPad ? `--esc-card-pad:${cardCfg.cardPad().map(v => v + 'px').join(' ')};` : ''}
     `;
   }
 }

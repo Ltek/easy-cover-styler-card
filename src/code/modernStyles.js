@@ -5,6 +5,7 @@
  * Stored in its own shared HA system store so styles can be reused across covers/cards
  * by `lib:<slug>` reference. System scope only (per project rule).
  */
+import { bumpLibRev } from './libRev.js';
 import {clamp} from './dividers.js';
 
 // ---- style shape + defaults -------------------------------------------------
@@ -89,6 +90,25 @@ function isBuiltinModernSlug(slug) { return !!BUILTIN_MODERN_STYLES[slug]; }
 const MODERN_LIB_KEY = 'flex_cover_slider_styles';
 const MODERN_LIB_VERSION = 1;
 const MODERN_LIBRARY = { system: { map: null, loaded: false, subscribed: false } };
+// v2026.09.24.181: LIVE DRAFT. While a style is open in the editor, its unsaved values are published
+// here so the card in the dashboard editor's preview pane shows them as you type. Nothing is written
+// to Home Assistant; Save stores the style as before, Cancel clears the draft and the card reverts.
+// The editor and the preview card are the same bundle in the same page, so this module state is shared.
+const MODERN_DRAFTS = new Map();
+let _mdTimer = null;
+function _mdNotify(st) {
+  clearTimeout(_mdTimer);
+  _mdTimer = setTimeout(() => {
+    (st.listeners || new Set()).forEach((fn) => { try { fn(); } catch (e) {} });
+  }, 120);
+}
+/** Publish (groups) or clear (null) the unsaved draft of one Slider Style. */
+export function setModernStyleDraft(slug, groups) {
+  if (!slug || slug === '__new__') return;          // nothing can reference an unsaved new style yet
+  if (groups) MODERN_DRAFTS.set(slug, { groups }); else if (!MODERN_DRAFTS.delete(slug)) return;
+  _mdNotify(MODERN_LIBRARY.system);
+}
+
 
 export function modernRefSlug(ref) {
   return (typeof ref === 'string' && ref.startsWith('lib:')) ? ref.slice(4) : null;
@@ -105,13 +125,24 @@ function _parseValue(value) {
 }
 export function ensureModernStyleLibrary(hass, onChange) {
   const st = MODERN_LIBRARY.system;
+  // v2026.09.24.144: keep a LIST of listeners. The old code subscribed once and captured only that
+  // first caller's callback, so whichever of the card or the editor reached here first won the
+  // subscription and the other was never told about a change. In practice the editor usually won,
+  // which is why saving a style did not refresh the card preview beside it — the preview only picked
+  // the change up when the element was recreated.
+  st.listeners = st.listeners || new Set();
+  if (typeof onChange === 'function') st.listeners.add(onChange);
   if (!hass || !hass.connection || st.subscribed) return;
   const conn = hass.connection;
   if (typeof conn.subscribeMessage === 'function') {
     st.subscribed = true;
     try {
-      conn.subscribeMessage((ev) => { st.map = _parseValue(ev && ev.value); st.loaded = true; if (typeof onChange === 'function') { try { onChange(); } catch (e) {} } },
-        { type: 'frontend/subscribe_system_data', key: MODERN_LIB_KEY });
+      conn.subscribeMessage((ev) => {
+        st.map = _parseValue(ev && ev.value);
+        st.loaded = true;
+        bumpLibRev();
+        st.listeners.forEach((fn) => { try { fn(); } catch (e) {} });
+      }, { type: 'frontend/subscribe_system_data', key: MODERN_LIB_KEY });
     } catch (e) { st.subscribed = false; }
   }
 }
@@ -143,7 +174,8 @@ export function resolveModernStyle(ref) {
   else {
     const slug = modernRefSlug(ref) || (isBuiltinModernSlug(ref) ? ref : null);
     if (slug) {
-      const src = isBuiltinModernSlug(slug) ? BUILTIN_MODERN_STYLES[slug] : modernStyleLibraryMap()[slug];
+      const src = MODERN_DRAFTS.get(slug)
+        || (isBuiltinModernSlug(slug) ? BUILTIN_MODERN_STYLES[slug] : modernStyleLibraryMap()[slug]);
       groups = src ? src.groups : null;
     }
   }
@@ -232,3 +264,12 @@ export function modernHandleStyle(style, pct, fillColor, axis = 'v') {
   return `position:absolute;${along}${cross}${tf}width:${w}px;height:${h}px;border-radius:${br};background:${color};${outline}${glow}`;
 }
 export { cssColorWithAlpha as modernColorWithAlpha, gradientCss as modernGradientCss };
+
+// v2026.10.01.190: remove a listener added by the ensure function. Callers pass ONE stable function per
+// card/editor instance and remove it when that instance leaves the page.
+export function offModernStyleLibrary(fn) {
+  Object.values(MODERN_LIBRARY).forEach((st) => { if (st && st.listeners) st.listeners.delete(fn); });
+}
+export function modernStyleListenerCount() {
+  return Object.values(MODERN_LIBRARY).reduce((n, st) => n + ((st && st.listeners) ? st.listeners.size : 0), 0);
+}

@@ -16,7 +16,7 @@ const plugins = [
   copy({
     targets: [
       {
-        src: "src/*.png",
+        src: "src/images",
         dest: "dist",
       },
     ],

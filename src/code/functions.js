@@ -64,11 +64,16 @@ export function defImagePathOrColor(image_map,image)
   if (!image) return '';
 
   if (!image.includes('.')){
-    // is Color
+    // no dot at all => it is a colour, not a file
     result=image;
+  }else if (/^(https?:)?\/\//.test(image) || image.startsWith('/')){
+    // already absolute (http(s):// , // , or /local/…) => use verbatim
+    result = image;
   }else{
-    // is URL
-    result =(image.includes('/') ? image : `${image_map}/${image}`);
+    // v2026.09.24.140: relative, which now INCLUDES the type folder ('slats/blind.png').
+    // The old rule treated any value containing '/' as absolute, which would have broken every
+    // foldered value by dropping the image-map prefix.
+    result = `${image_map}/${image}`;
   }
   return result;
 }
@@ -230,6 +235,23 @@ export function boundary(value,val1=0,val2=100){
   let min = Math.min(val1,val2);
   let max = Math.max(val1,val2);
   return Math.max(min,Math.min(max,value));
+}
+// v2026.09.24.92: size an in-place rotation wrapper. CSS transforms are post-layout, so we measure
+// the inner content's pre-transform box (offsetWidth/Height) and give the wrapper the swapped
+// dimensions, then corner-rotate (transform-origin: top left) and translate the content back into
+// view. Shared by the cover panels and the card-level area-button bar. No-op when not rotated/sized.
+export function sizeRotationWrapper(wrap){
+  if (!wrap) return;
+  const inner = wrap.querySelector(':scope > .ecs-rot-inner');
+  if (!inner) return;
+  const rotation = wrap.getAttribute('data-rotation');
+  const w = inner.offsetWidth;
+  const h = inner.offsetHeight;
+  if (!w || !h) return;
+  wrap.style.width = `${h}px`;
+  wrap.style.height = `${w}px`;
+  if (rotation === 'right') inner.style.transform = `translateX(${h}px) rotate(90deg)`;
+  else if (rotation === 'left') inner.style.transform = `translateY(${w}px) rotate(-90deg)`;
 }
 /**
  * function findElement() to find an element in DOM body, inluding shadow DOMs.

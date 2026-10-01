@@ -25,7 +25,6 @@ export const ESC_CLASS_MIDDLE = `${ESC_CLASS_BASE_NAME}-middle`;
 export const ESC_CLASS_BOTTOM = `${ESC_CLASS_BASE_NAME}-${BOTTOM}`;
 export const ESC_CLASS_TOP_BOTTOM = `${ESC_CLASS_BASE_NAME}-${TOP}-${BOTTOM}`;
 export const ESC_CLASS_LABEL = `${ESC_CLASS_BASE_NAME}-label`;
-export const ESC_CLASS_POSITION = `${ESC_CLASS_BASE_NAME}-position`;
 export const ESC_CLASS_LABEL_DISABLED = `${ESC_CLASS_LABEL}-disabled`;
 export const ESC_CLASS_BUTTONS = `${ESC_CLASS_BASE_NAME}-buttons`;
 export const ESC_CLASS_SHUTTER = `${ESC_CLASS_BASE_NAME}`;
@@ -82,10 +81,8 @@ export const FONT_SIZE_LABEL = 20;
 export const LINE_HEIGHT_LABEL = 30;
 export const UNITY= 'px';
 export const FONT_SIZE_POSITION = 14;
-export const MARGIN_POSITION = 5;
 export const ICON_SIZE = 24;
 export const ICON_DIV_SIZE = 34;
-export const LINE_HEIGHT_POSITION = 20;
 export const SELECTOR_MARGIN = 4;
 
 export const ESC_FEATURE_OPEN              = 0b00000001; // 1
@@ -163,6 +160,12 @@ export const CONFIG_PANEL_POS_COLOR = 'panel_position_color';
 export const CONFIG_PANEL_POS_END = 'panel_position_end'; // where Open/Closed text goes when on-handle: handle|center|above|below (% stays on handle)
 export const CONFIG_MODERN_TRAVEL = 'modern_travel';       // 'single' | 'center' (center-out) | 'tdbu' (top-down/bottom-up)
 export const CONFIG_MODERN_SECOND_ENTITY = 'modern_second_entity'; // tdbu: entity giving the OTHER rail's position (top rail)
+// v2026.09.24.128: TDBU is per-cover, so one card-level second-entity field cannot serve a card
+// showing several TDBU covers. This maps each cover entity to its TOP-rail entity:
+//   tdbu_top_entities: { 'cover.master_bedroom': 'cover.master_bedroom_top', ... }
+// Entity ids stay on the CARD (never inside a shared Cover Style). The legacy single
+// modern_second_entity key is still honoured as a fallback for one-cover cards.
+export const CONFIG_TDBU_TOP_ENTITIES = 'tdbu_top_entities';
 export const CONFIG_IMAGE_MAP = 'image_map';
 export const CONFIG_WINDOW_IMAGE = 'window_image';
 export const CONFIG_VIEW_IMAGE = 'view_image';
@@ -183,20 +186,10 @@ export const IMAGE_TYPES = [
 ];
 
 export const HA_CARD_NAME = "easy-cover-styler-card";
-// Back-compat aliases for existing dashboards. Both previous card types keep working via thin
-// subclasses registered in the entry file. Remove once every dashboard has migrated.
-export const HA_CARD_NAME_LEGACY_FLEX = "flex-cover-card";       // previous rebrand
-export const HA_CARD_NAME_LEGACY_ESC  = "enhanced-shutter-card"; // original name
-export const HA_CARD_NAME_LEGACIES = [HA_CARD_NAME_LEGACY_FLEX, HA_CARD_NAME_LEGACY_ESC];
-// Deprecated single-alias export kept so any external reference still resolves.
-export const HA_CARD_NAME_LEGACY = HA_CARD_NAME_LEGACY_ESC;
 export const HA_SHUTTER_NAME = `easy-cover-styler`;
-// Legacy child element tags — kept registered so a cached/half-rendered card never emits an
-// unknown element. Remove alongside the legacy card aliases.
-export const HA_SHUTTER_NAME_LEGACIES = ['flex-cover', 'enhanced-shutter'];
 export const HA_EDITOR_NAME = "easy-cover-styler-card-editor";
 export const CARD_DISPLAY_NAME = "Easy Cover Styler Card";
-export const CARD_VERSION = '2026.09.24.83';   // single source of truth (editor header + console banner)
+export const CARD_VERSION = '2026.10.01.191';   // single source of truth (editor header + console banner)
 export const HA_HUI_VIEW = 'hui-view';
 export const SPACE = ' ';
 
@@ -285,15 +278,33 @@ export const CONFIG_LAYOUT = 'layout';
 export const CONFIG_AREAS = 'areas';
 export const CONFIG_LABELS = 'labels';
 export const CONFIG_AUTO_FILTER = 'auto_filter';   // { device_class:[...], exclude:[...] }
+export const AUTO_FILTER_EXCLUDE_HIDDEN = 'exclude_hidden';  // auto_filter sub-key (opt-in)
 export const CONFIG_AREA_NAMES = 'area_names';     // { area_id: "Display Name" }
 export const CONFIG_LABEL_NAMES = 'label_names';   // { label_id: "Display Name" }
 export const CONFIG_AREA_PRESETS = 'area_presets';   // { area_id|name: { shutter_preset|window_image|... } } per-area image/style overrides
 export const CONFIG_ENTITY_PRESETS = 'entity_presets'; // { entity_id: { shutter_preset|window_image|... } } per-entity image/style overrides
+// v2026.09.24.84: per-area panel rotation override — { area_id|name: 'normal'|'left'|'right' }.
+// Wins over CONFIG_PANEL_ROTATION for covers in that area, so a whole area/screen can share one
+// rotation independent of the card-wide default.
+
+// v2026.09.24.114 (Cover Styles Phase 2): assignment of Cover Styles (see coverStyles.js).
+//   cover_styles          : { '<styleRef>': ['Area A', 'Area B', …] }  style -> areas
+//   cover_styles_entities : { 'cover.x': '<styleRef>' }                entity -> style
+//   cover_style_default   : '<styleRef>' applied to any cover with no assignment.
+// cover_style_default is OPT-IN: when unset, no Cover Style is applied and the card behaves exactly
+// as before, so existing dashboards are untouched.
+export const CONFIG_COVER_STYLES = 'cover_styles';
+export const CONFIG_COVER_STYLES_ENTITIES = 'cover_styles_entities';
+export const CONFIG_COVER_STYLE_DEFAULT = 'cover_style_default';
+// v2026.09.24.118: per-group expansion. { 'cover.group': true|false } overrides the card-level
+// show_group_members for that group only, set from its row in Covers & Styles.
+export const CONFIG_GROUP_EXPAND = 'group_expand';
 export const CONFIG_POSITION_PRESETS = 'position_presets'; // [] = card default preset buttons
 export const CONFIG_PARTIAL_BUTTONS_STYLE = 'partial_buttons_style'; // icons | values
 export const PARTIAL_STYLE_ICONS = 'icons';
 export const PARTIAL_STYLE_VALUES = 'values';
-export const ESC_PARTIAL_PRESETS_DEFAULT = [100, 75, 50, 25, 10, 0];
+// v2026.09.24.144: the fallback when a Cover Style does not set Preset Percentages.
+export const ESC_PARTIAL_PRESETS_DEFAULT = [25, 50, 75];
 
 // v1.23.0: order of the elements inside a cover (#8)
 export const CONFIG_COVER_ORDER = 'cover_order';
@@ -321,6 +332,15 @@ export const CONFIG_ALL_LABEL = 'all_label';       // name of the per-area/label
 export const CONFIG_SHOW_ALL_CONTROL = 'show_all_control';       // show the per-area "All" group control
 export const CONFIG_COVERS_COLLAPSIBLE = 'covers_collapsible';   // let the covers row collapse
 export const CONFIG_COVERS_START_COLLAPSED = 'covers_start_collapsed';
+// v2026.09.24.94 (Build 2): quick toggles (bucket B — always user-editable, seeded per-preset).
+export const CONFIG_SHOW_INDIVIDUAL_PANELS = 'show_individual_panels'; // RETIRED v179 (now per area: area_panels)
+// v2026.09.24.179: which panels each Area / Label / Cover row shows. { "<row value>": "group" | "individual" };
+// a row with no entry shows both. Per row, so one card can show different panels on different screens.
+export const CONFIG_AREA_PANELS = 'area_panels';
+export const AREA_PANELS_BOTH = 'both';
+export const AREA_PANELS_GROUP = 'group';
+export const AREA_PANELS_INDIVIDUAL = 'individual';
+export const CONFIG_SHOW_DIVIDERS = 'show_dividers';                   // master gate over the per-side divider matrix
 // v1.33.0: area layout arrangement
 export const CONFIG_AREA_BUTTONS_DIR = 'area_buttons_direction'; // column | row (legacy)
 export const CONFIG_AREA_BUTTONS_PLACEMENT = 'area_buttons_placement'; // above | left
@@ -334,11 +354,59 @@ export const CONFIG_COVER_PAD_TOP = 'cover_pad_top';
 export const CONFIG_COVER_PAD_RIGHT = 'cover_pad_right';
 export const CONFIG_COVER_PAD_BOTTOM = 'cover_pad_bottom';
 export const CONFIG_COVER_PAD_LEFT = 'cover_pad_left';
-export const CONFIG_COVERS_DIRECTION = 'covers_direction';       // row | column
+// v2026.09.24.163: the GROUP panel's own padding. cover_pad_* used to pad every panel, group included,
+// because both wrappers shared .esc-cover-pad. Now cover_pad_* is the individual panels only.
+export const CONFIG_GROUP_PAD_TOP = 'group_pad_top';
+export const CONFIG_GROUP_PAD_RIGHT = 'group_pad_right';
+export const CONFIG_GROUP_PAD_BOTTOM = 'group_pad_bottom';
+export const CONFIG_GROUP_PAD_LEFT = 'group_pad_left';
 export const CONFIG_GROUP_WITH_COVERS = 'group_with_covers';     // group control joins the covers flow (leftmost/topmost)
-export const CONFIG_GROUP_STICKY = 'group_sticky';               // sticky (fixed) vs scroll with covers
+export const CONFIG_GROUP_STICKY = 'group_sticky';
+// v2026.09.24.159: uniform scale for the Group Panel (the aggregate "All" panel). One slider scales
+// every element inside it at the same rate. Applied with CSS `zoom`, NOT transform: zoom changes the
+// layout box so the covers beside it reflow; transform:scale() would leave the original footprint
+// reserved and overlap neighbours. Percent; 100 = unchanged.
+export const CONFIG_GROUP_SCALE = 'group_scale';
+// v2026.09.24.182: Area Buttons panel scale, card padding per side, and cross-panel alignment
+export const CONFIG_AREA_BUTTONS_SCALE = 'area_buttons_scale';
+export const CONFIG_COVERS_SCALE = 'covers_scale';               // v187: % zoom on every individual cover panel
+export const CONFIG_CARD_BORDER = 'card_border';                 // v187: theme | none | frame
+export const CARD_BORDER_THEME = 'theme';
+export const CARD_BORDER_NONE = 'none';
+export const CARD_BORDER_FRAME = 'frame';   // % (CSS zoom on the buttons panel)
+export const CONFIG_CARD_PAD_TOP = 'card_pad_top';
+export const CONFIG_CARD_PAD_RIGHT = 'card_pad_right';
+export const CONFIG_CARD_PAD_BOTTOM = 'card_pad_bottom';
+export const CONFIG_CARD_PAD_LEFT = 'card_pad_left';
+export const CONFIG_COLLAPSE_LINE = 'collapse_line';             // v186: show the line above the collapse toggle
+export const CONFIG_COLLAPSE_GAP = 'collapse_gap';               // v186: px between the top bar and the collapse toggle
+export const CONFIG_COVERS_ALIGN = 'covers_align';               // start | center-group | center-card
+export const CONFIG_AREA_BUTTONS_ALIGN = 'area_buttons_align';   // start | center-covers | center-card
+// v2026.09.24.170: the card's background, using the four-mode colour control (design guide §3) plus
+// Transparent. Unset = the HA theme's card background. Card-level, not a Cover Style key.
+export const CONFIG_CARD_BACKGROUND = 'card_background';
+// v2026.09.24.171: a frame from the shared Frame Library ('lib:<slug>') or a built-in, card level.
+export const CONFIG_CARD_FRAME = 'card_frame';
+// v2026.09.24.173: one scale for the WHOLE card (percent, 100 = unchanged). CSS zoom on the card
+// element, like group_scale: zoom changes the layout box, so the dashboard grid reflows around the
+// card instead of the card overflowing its slot the way transform:scale() would.
+export const CONFIG_CARD_SCALE = 'card_scale';               // sticky (fixed) vs scroll with covers
 // v1.29.0: dividers between individual covers (full divider suite)
 export const CONFIG_SHOW_COVER_DIVIDERS = 'show_cover_dividers';
+// v2026.09.24.90: split divider placement. show_cover_dividers now means "between individual
+// panels" only. The group/aggregate panel gets its own per-side dividers (screen L/R/T/B) so you
+// can, e.g., draw a single divider between the group and the whole set of individuals (Group→Right
+// in a horizontal row). All dividers share the one divider_* style.
+export const CONFIG_GROUP_DIVIDER_LEFT = 'group_divider_left';
+export const CONFIG_GROUP_DIVIDER_RIGHT = 'group_divider_right';
+export const CONFIG_GROUP_DIVIDER_TOP = 'group_divider_top';
+export const CONFIG_GROUP_DIVIDER_BOTTOM = 'group_divider_bottom';
+// Individual panels get the same per-side options as the group panel. Each enabled side draws a
+// divider on that edge of every individual cover panel (Left/Right = vertical, Top/Bottom = horizontal).
+export const CONFIG_IND_DIVIDER_LEFT = 'ind_divider_left';
+export const CONFIG_IND_DIVIDER_RIGHT = 'ind_divider_right';
+export const CONFIG_IND_DIVIDER_TOP = 'ind_divider_top';
+export const CONFIG_IND_DIVIDER_BOTTOM = 'ind_divider_bottom';
 export const CONFIG_DIVIDER_STYLE = 'divider_style';             // solid | dashed | dotted
 export const CONFIG_DIVIDER_COLOR = 'divider_color';             // four-mode color
 export const CONFIG_DIVIDER_THICKNESS = 'divider_thickness';     // px
@@ -386,10 +454,6 @@ export const ESC_CLASS_ICON_CELL = `${ESC_CLASS_BASE_NAME}-icon-cell`;
 export const CONFIG_NAME_TEXT_SIZE = 'name_text_size';       // px
 export const CONFIG_NAME_TEXT_WEIGHT = 'name_text_weight';   // normal|bold|500…
 export const CONFIG_NAME_TEXT_COLOR = 'name_text_color';     // four-mode color
-export const CONFIG_POSITION_TEXT_SIZE = 'position_text_size'; // px
-export const CONFIG_POSITION_TEXT_COLOR = 'position_text_color';
-export const CONFIG_POSITION_TEXT_WEIGHT = 'position_text_weight';
-export const CONFIG_POSITION_BACKGROUND = 'position_background'; // keep the highlight box behind the % text
 export const CONFIG_COVER_GAP = 'cover_gap';                 // px, spacing between covers (area layout)
 export const CONFIG_COLLAPSE_ICON = 'collapse_icon';         // mdi for the individual-covers expand/collapse toggle ('' = chevron)
 export const CONFIG_COLLAPSE_ICON_SIZE = 'collapse_icon_size';   // px (0 = default)
@@ -414,18 +478,41 @@ export const CONFIG_PCT_BUTTON_WEIGHT = 'pct_button_weight';
 export const CONFIG_PCT_BUTTON_SIZE = 'pct_button_size';
 export const CONFIG_PCT_BUTTON_STYLE = 'pct_button_style'; // shared Button Styles library ref for value buttons
 export const CONFIG_HEADER_IMAGE_GAP = 'header_image_gap';   // px, vertical gap between header text and the image
+// v2026.09.24.150: space between the cover NAME and the cover, independent of the header block's
+// overall gap (the header can also hold the position readout, which this deliberately ignores).
+export const CONFIG_NAME_COVER_GAP = 'name_cover_gap';
+// v2026.09.24.151: the readout's twin of name_cover_gap. Both are applied on the side FACING the
+// cover, which is what makes one gap per item enough to control all three distances:
+//   Name -> cover, Readout -> cover, and Name -> Readout when they share a side (the outer item's
+//   gap separates it from the inner one, the inner one's gap separates it from the cover).
+export const CONFIG_POS_COVER_GAP = 'pos_cover_gap';
 
 // layout modes for CONFIG_LAYOUT
 export const LAYOUT_STACK = 'stack';   // default: existing flat vertical/horizontal stack
 export const LAYOUT_AREAS = 'areas';   // area-selector layout (buttons + full-area "All" + covers)
 // v1.40.0: orientation + area selector decoupled; group placement
 export const CONFIG_ORIENTATION = 'orientation';           // vertical | horizontal (how covers stack)
+// v2026.09.24.84: whole-panel rotation — rotates each cover's image/bar + all its controls/info
+// as one unit. Card-level default.
+// whole screen/view of covers can share one rotation regardless of the card default.
+export const CONFIG_PANEL_ROTATION = 'panel_rotation';      // normal | left | right
+export const PANEL_ROTATION_NORMAL = 'normal';
+export const PANEL_ROTATION_LEFT = 'left';   // rotate 90° counter-clockwise
+export const PANEL_ROTATION_RIGHT = 'right'; // rotate 90° clockwise
+export const PANEL_ROTATIONS = [PANEL_ROTATION_NORMAL, PANEL_ROTATION_LEFT, PANEL_ROTATION_RIGHT];
 export const CONFIG_SHOW_AREA_SELECTOR = 'show_area_selector'; // show the area/label button menu on either orientation
 export const CONFIG_GROUP_PLACEMENT = 'group_placement';   // menu = beside the buttons (row 1); covers = inline first cover
 export const GROUP_PLACE_MENU = 'menu';
 export const GROUP_PLACE_COVERS = 'covers';
 // v1.41.0: inline toggles + group-name-from-area
 export const CONFIG_AREA_MENU_INLINE = 'area_menu_inline';   // area selector menu flows inline with the cover panels
+// v2026.09.24.88: when the area menu is in its own top bar (not inline), flow the buttons as a
+// horizontal wrapping row instead of the default vertical column.
+export const CONFIG_AREA_BUTTONS_ROW = 'area_buttons_row';   // bool
+// v2026.09.24.92: rotate the area button panel to match the individual panels' rotation, instead of
+// the default re-flow-to-horizontal-row behaviour. When on and the view is rotated left/right, the
+// whole button menu is rotated the same way (buttons turn sideways with the covers).
+export const CONFIG_AREA_BUTTONS_ROTATE = 'area_buttons_rotate'; // bool
 export const CONFIG_GROUP_INLINE = 'group_inline';           // group panel flows inline with the cover panels
 export const CONFIG_GROUP_NAME_FROM_AREA = 'group_name_from_area'; // group control name = selected area's name
 export const CONFIG_COLLAPSE_LABEL = 'collapse_label';       // custom label for the collapse toggle
@@ -445,7 +532,6 @@ export const CONFIG_SUPPORTED_FEATURES = 'supported_features';
 export const CONFIG_BATTERY_ENTITY_ID = 'battery_entity';
 export const CONFIG_SIGNAL_ENTITY_ID = 'signal_entity';
 
-export const CONFIG_SHOW_GROUP_MEMBERS = 'show_group_members';
 
 
 export const CONFIG_SCALE_ICONS = 'scale_icons';
@@ -455,15 +541,20 @@ export const CONFIG_OFFSET_OPENED_PCT = 'top_offset_pct'; // TODO  rename: top->
 export const CONFIG_OFFSET_CLOSED_PCT = 'bottom_offset_pct'; // TODO rename bottom->closed
 export const CONFIG_BUTTONS_POSITION = 'buttons_position';
 export const CONFIG_NAME_POSITION = 'name_position';
-export const CONFIG_OPENING_POSITION = 'opening_position';
 export const CONFIG_ICONS_POSITION = 'icons_position';
 
-export const CONFIG_INLINE_HEADER = 'inline_header';
-// v1.21.0: header alignment / order / spacing
-export const CONFIG_HEADER_ALIGN = 'header_align';   // left | center | right
-export const CONFIG_HEADER_ORDER = 'header_order';   // name | position
-export const CONFIG_HEADER_GAP = 'header_gap';       // px between name and position
-export const HEADER_ALIGN_MAP = { left: 'flex-start', center: 'center', right: 'flex-end' };
+// v2026.09.24.132: align the header over the COVER instead of the whole panel. With the control
+// buttons in a column beside the cover, centring across the panel puts the name off-centre relative
+// to the cover image itself, which reads as a mistake.
+export const CONFIG_HEADER_ON_COVER = 'header_on_cover';
+// v2026.09.24.154: cross-axis alignment of the Name / Position Readout on whichever side they sit.
+// Axis-neutral values: start = Left or Top, center = Center or Middle, end = Right or Bottom.
+export const CONFIG_NAME_ALIGN = 'name_align';
+export const CONFIG_POS_ALIGN = 'position_align';
+export const ALIGN_START = 'start';
+export const ALIGN_CENTER = 'center';
+export const ALIGN_END = 'end';
+export const ALIGN_FLEX_MAP = { start: 'flex-start', center: 'center', end: 'flex-end' };
 
 export const CONFIG_INVERT_PCT       = 'invert_percentage'; // deprecated
 export const CONFIG_INVERT_PCT_COVER = 'invert_percentage_cover'; // new
@@ -486,13 +577,11 @@ export const CONFIG_OFFSET_IS_CLOSED_PCT = 'offset_closed_percentage'; // TODO r
 export const CONFIG_ALWAYS_PCT = 'always_percentage';
 //======
 export const CONFIG_NAME_DISABLED = 'name_disabled'; //deprecated SHOW 1
-export const CONFIG_OPENING_DISABLED = 'opening_disabled';  // deprecated SHOW 2
 export const CONFIG_TILT_SLIDER_ONLY = 'tilt_slider_only';  // deprecated SHOW 4
 export const CONFIG_DISABLE_STANDARD_BUTTONS = 'disable_standard_buttons'; // deprecated SHOW 5
 export const CONFIG_DISABLE_PARTIAL_OPEN_BUTTONS = 'disable_partial_open_buttons'; // deprecated SHOW 6
 
 export const CONFIG_SHOW_NAME = 'show_name'; // new    SHOW 1
-export const CONFIG_SHOW_OPENING = "show_opening"; //new SHOW 2
 export const CONFIG_SHOW_TILT_BUTTONS = 'show_tilt_buttons'; // SHOW 4
 export const CONFIG_SHOW_STANDARD_BUTTONS = 'show_standard_buttons'; //SHOW 5
 export const CONFIG_SHOW_PARTIAL_OPEN_BUTTONS = 'show_partial_open_buttons';//SHOW 6
@@ -509,11 +598,48 @@ export const CONFIG_CURRENT_POSITION = 'current_position';
 export const CONFIG_BUTTON_STOP_HIDE_STATES = 'button_stop_hide_states';
 export const CONFIG_BUTTON_OPENED_HIDE_STATES = 'button_up_hide_states';  // TODO rename up->opened
 export const CONFIG_BUTTON_CLOSED_HIDE_STATES = 'button_down_hide_states'; // TODO rename down->closed
+// v2026.09.24.166: per-button VISIBILITY. The *_hide_states lists now pick WHEN a button reacts; by
+// default it is recoloured (so the user can still see and press it), and *_hide restores the old
+// behaviour of removing it. Colour is a four-mode value (default / theme / hex / css).
+export const CONFIG_BUTTON_UP_HIDE = 'button_up_hide';
+export const CONFIG_BUTTON_DOWN_HIDE = 'button_down_hide';
+export const CONFIG_BUTTON_STOP_HIDE = 'button_stop_hide';
+export const CONFIG_BUTTON_UP_STATE_COLOR = 'button_up_state_color';
+export const CONFIG_BUTTON_DOWN_STATE_COLOR = 'button_down_state_color';
+export const CONFIG_BUTTON_STOP_STATE_COLOR = 'button_stop_state_color';
+// v2026.09.24.166: button-group spacing, replacing controls_gap / controls_button_padding /
+// controls_button_margin (three overlapping settings). One gap BETWEEN buttons, plus padding on each
+// side of the group. Default right=6 reproduces the old default 6px controls<->cover gap for the
+// default button position (left), so untouched cards do not move.
+export const CONFIG_CONTROLS_BUTTON_GAP = 'controls_button_gap';
+export const CONFIG_CONTROLS_PAD_TOP = 'controls_pad_top';
+export const CONFIG_CONTROLS_PAD_RIGHT = 'controls_pad_right';
+export const CONFIG_CONTROLS_PAD_BOTTOM = 'controls_pad_bottom';
+export const CONFIG_CONTROLS_PAD_LEFT = 'controls_pad_left';
+// v2026.09.24.169: Position Buttons get their own spacing. Both button groups share the
+// ESC_CLASS_BUTTONS container class, so since v166 the Directional Controls padding was ALSO being
+// applied to the position buttons. Defaults reproduce the pre-v166 look: 0 padding, and the values
+// variant's old 4px gap between buttons.
+export const CONFIG_PCT_BUTTON_GAP = 'pct_button_gap';
+export const CONFIG_PCT_PAD_TOP = 'pct_pad_top';
+export const CONFIG_PCT_PAD_RIGHT = 'pct_pad_right';
+export const CONFIG_PCT_PAD_BOTTOM = 'pct_pad_bottom';
+export const CONFIG_PCT_PAD_LEFT = 'pct_pad_left';
+// v2026.09.24.172: LAST CHANGED readout — when the cover's state last changed, as a clock time
+// ("12:02 PM") and/or elapsed time ("3 h 12 m"), using the same formats as the Entity card. Mirrors
+// Position Readout: same placements (sides + handle), alignment, size/weight/colour and gap.
+export const CONFIG_LC_SHOW_TIME = 'lc_show_time';
+export const CONFIG_LC_SHOW_AGO = 'lc_show_ago';
+export const CONFIG_LC_PLACEMENT = 'lc_placement';
+export const CONFIG_LC_ALIGN = 'lc_align';
+export const CONFIG_LC_SIZE = 'lc_size';
+export const CONFIG_LC_WEIGHT = 'lc_weight';
+export const CONFIG_LC_COLOR = 'lc_color';
+export const CONFIG_LC_COVER_GAP = 'lc_cover_gap';
 
 export const invertBoolean = (value) => !value;
 export const DEPRECATED={
   [CONFIG_NAME_DISABLED]: {new: CONFIG_SHOW_NAME, value: invertBoolean},
-  [CONFIG_OPENING_DISABLED]: {new: CONFIG_SHOW_OPENING, value: invertBoolean},
   [CONFIG_TILT_SLIDER_ONLY]: {new: CONFIG_SHOW_TILT_BUTTONS, value: invertBoolean},
   [CONFIG_SHOW_TILT]: {new: CONFIG_SHOW_TILT_SLIDER}, // only name change, value remains the same
   [CONFIG_DISABLE_STANDARD_BUTTONS]: {new: CONFIG_SHOW_STANDARD_BUTTONS, value: invertBoolean},
@@ -545,7 +671,6 @@ export const ESC_ENTITY_ID = null;
 export const ESC_BATTERY_ENTITY_ID = null;
 export const ESC_SIGNAL_ENTITY_ID = null;
 
-export const ESC_SHOW_GROUP_MEMBERS = false;
 
 export const ESC_SUPPORTED_FEATURES = ESC_FEATURE_ALL;
 
@@ -570,9 +695,11 @@ export const ESC_STACKED = VERTICAL;
 // v1.7.0 auto-generate / layout defaults
 export const ESC_LAYOUT = LAYOUT_STACK;
 export const ESC_ORIENTATION = 'vertical';
-export const ESC_SHOW_AREA_SELECTOR = false;
+export const ESC_SHOW_AREA_SELECTOR = true;   // v179: Area Buttons default ON
 export const ESC_GROUP_PLACEMENT = 'menu';
 export const ESC_AREA_MENU_INLINE = false;
+export const ESC_AREA_BUTTONS_ROW = false;
+export const ESC_AREA_BUTTONS_ROTATE = false;
 export const ESC_GROUP_INLINE = false;
 export const ESC_GROUP_NAME_FROM_AREA = false;
 export const ESC_COLLAPSE_LABEL = '';
@@ -588,7 +715,7 @@ export const ESC_COVERS_COLLAPSIBLE = false;
 export const ESC_COVERS_START_COLLAPSED = false;
 export const ESC_AREA_BUTTONS_DIR = 'column';
 export const ESC_AREA_BUTTONS_PLACEMENT = 'above';
-export const ESC_AREA_BUTTON_WRAP = false;
+export const ESC_AREA_BUTTON_WRAP = true;
 export const ESC_AREA_BUTTONS_WRAP_MODE = 'nowrap';
 export const ESC_AREA_BUTTONS_COLUMNS = 0;
 export const ESC_COVERS_WRAP_MODE = 'scroll';
@@ -597,7 +724,6 @@ export const ESC_COVER_PAD_TOP = 0;
 export const ESC_COVER_PAD_RIGHT = 0;
 export const ESC_COVER_PAD_BOTTOM = 0;
 export const ESC_COVER_PAD_LEFT = 0;
-export const ESC_COVERS_DIRECTION = 'row';
 export const ESC_GROUP_WITH_COVERS = false;
 export const ESC_GROUP_STICKY = false;
 export const ESC_SHOW_COVER_DIVIDERS = false;
@@ -636,25 +762,23 @@ export const ESC_NAME_REMOVE = [];
 export const ESC_NAME_CAPITALIZE = false;
 export const ESC_NAME_STRIP_AREA = true;   // strip the room/area name by default
 export const ESC_AREA_NAME_VALUE = '';
-export const ESC_NAME_TEXT_SIZE = 0;
+export const ESC_NAME_TEXT_SIZE = 14;
 export const ESC_NAME_TEXT_WEIGHT = '';
-export const ESC_NAME_TEXT_COLOR = '';
-export const ESC_POSITION_TEXT_SIZE = 0;
-export const ESC_POSITION_TEXT_COLOR = '';
-export const ESC_POSITION_TEXT_WEIGHT = '';
-export const ESC_POSITION_BACKGROUND = false; // highlight box removed by default (v1.20.0)
+export const ESC_NAME_TEXT_COLOR = 'var(--secondary-text-color)';
 export const ESC_COVER_GAP = 0;
-export const ESC_CONTROLS_GAP = 0;
+export const ESC_CONTROLS_GAP = 6;
 export const ESC_CONTROLS_BUTTON_PAD = 6;   // matches the built-in 36px box / 24px icon
 export const ESC_CONTROLS_BUTTON_MARGIN = 0;
-export const ESC_CONTROL_ICON_COLOR = '';
+export const ESC_CONTROL_ICON_COLOR = 'var(--primary-color)';
 export const ESC_ICON_UP = ''; export const ESC_ICON_DOWN = ''; export const ESC_ICON_STOP = '';
 export const ESC_ICON_PARTIAL = ''; export const ESC_ICON_TILT_UP = ''; export const ESC_ICON_TILT_DOWN = '';
 export const ESC_PCT_ICON_COLOR = '';
-export const ESC_PCT_BUTTON_BG = ''; export const ESC_PCT_BUTTON_BORDER = ''; export const ESC_PCT_BUTTON_COLOR = '';
-export const ESC_PCT_BUTTON_WEIGHT = ''; export const ESC_PCT_BUTTON_SIZE = 0;
+export const ESC_PCT_BUTTON_BG = ''; export const ESC_PCT_BUTTON_BORDER = 'var(--primary-color)'; export const ESC_PCT_BUTTON_COLOR = 'var(--primary-text-color)';
+export const ESC_PCT_BUTTON_WEIGHT = ''; export const ESC_PCT_BUTTON_SIZE = 11;
 export const ESC_PCT_BUTTON_STYLE = '';
 export const ESC_HEADER_IMAGE_GAP = 0;
+export const ESC_NAME_COVER_GAP = 0;
+export const ESC_POS_COVER_GAP = 0;
 export const ESC_NAME = null;
 export const ESC_PASSIVE_MODE = false;
 // Pinned to the literal HACS folder name rather than derived from HA_CARD_NAME. The bundled images
@@ -663,11 +787,10 @@ export const ESC_PASSIVE_MODE = false;
 // until they reinstalled under the new repo folder. Update HACS_COMMUNITY_FOLDER by hand if/when the
 // repo itself is renamed and reinstalled.
 const HACS_COMMUNITY_FOLDER = 'easy-cover-styler-card';
-export const ESC_IMAGE_MAP = `/local/community/${HACS_COMMUNITY_FOLDER}`;
-// Legacy install folder — still present for users who haven't reinstalled under the new repo name.
-// Used as a fallback base path when an image fails to load from ESC_IMAGE_MAP. Remove once the
-// legacy card-type aliases are removed.
-export const ESC_IMAGE_MAP_LEGACY = `/local/community/${HA_CARD_NAME_LEGACY_FLEX}`;
+// v2026.09.24.140: images live in per-type folders under an `images/` root, so a value is
+// '<type>/<file>.png' and this points at that root. Kept as one base path so the whole set can be
+// relocated (or mirrored under /media) without touching any stored value.
+export const ESC_IMAGE_MAP = `/local/community/${HACS_COMMUNITY_FOLDER}/images`;
 export const ESC_COVER_VISUAL = 'image';   // default: classic image stack
 export const ESC_MODERN_STYLE = '';         // '' => MODERN_STYLE_DEFAULT
 export const ESC_MODERN_VALUE_POS = 'default';
@@ -675,14 +798,15 @@ export const ESC_POSITION_PLACEMENT = 'bottom';
 export const ESC_PANEL_POS_SHOW = false;
 export const ESC_PANEL_POS_SIZE = 0;
 export const ESC_PANEL_POS_WEIGHT = '';
-export const ESC_PANEL_POS_COLOR = '';
+export const ESC_PANEL_POS_COLOR = 'var(--accent-color)';
 export const ESC_PANEL_POS_END = 'handle';
 export const ESC_MODERN_TRAVEL = 'single';
 export const ESC_MODERN_SECOND_ENTITY = '';
-export const ESC_IMAGE_WINDOW = 'esc-window.png';
-export const ESC_IMAGE_VIEW = 'esc-view.png';
-export const ESC_IMAGE_SHUTTER_SLAT   = 'esc-shutter-slat.png';
-export const ESC_IMAGE_SHUTTER_BOTTOM = 'esc-shutter-bottom.png';
+export const ESC_TDBU_TOP_ENTITIES = null;
+export const ESC_IMAGE_WINDOW = 'frames/window.png';
+export const ESC_IMAGE_VIEW = 'views/view.png';
+export const ESC_IMAGE_SHUTTER_SLAT   = 'slats/shutter-slat.png';
+export const ESC_IMAGE_SHUTTER_BOTTOM = 'bottoms/shutter-bottom.png';
 export const ESC_ROTATE_MAIN_SHUTTER_IMAGE = true; // true: rotate slat image, false: use slat image as is
 export const ESC_STRETCH_EDGE_SHUTTER_IMAGE = true; // true: stretch bottom image, false: use bottom image as is
 export const ESC_BASE_HEIGHT_PX = 150; // image-height
@@ -700,14 +824,10 @@ export const ESC_BUTTONS_POSITION = LEFT;
 export const ESC_NAME_POSITION =TOP;
 export const ESC_NAME_DISABLED = false;
 export const ESC_SHOW_NAME = true;
-export const ESC_OPENING_POSITION = TOP;
 export const ESC_ICONS_POSITION = TOP;
-export const ESC_OPENING_DISABLED = false;
-export const ESC_SHOW_OPENING = true;
-export const ESC_INLINE_HEADER = false;
-export const ESC_HEADER_ALIGN = 'center';
-export const ESC_HEADER_ORDER = 'name';
-export const ESC_HEADER_GAP = 0;
+export const ESC_HEADER_ON_COVER = true;   // v153: centring on the cover is the sane default
+export const ESC_NAME_ALIGN = 'center';
+export const ESC_POS_ALIGN = 'center';
 
 export const ESC_INVERT_PCT_UI = false;
 export const ESC_INVERT_PCT_COVER = false;
@@ -761,6 +881,67 @@ export const INVERT_OPEN_CLOSE_SETTING ={
   [DOWN]: UP,
 };
 
+// v2026.09.24.87: Layout presets — one-click bundles of the placement/orientation keys for common
+// arrangements. Applying a preset writes each key individually (editor deletes keys equal to the
+// default, keeping YAML byte-stable), so users can fine-tune afterward. Presets only touch the
+// CORE layout keys below (orientation/rotation/control positions/covers layout). Area-button and
+// group-panel visibility are independent checkboxes, and the area-menu arrangement is a separate
+// Area Menu Style bundle — so a small number of presets combine flexibly with those toggles.
+// NOTE: declared here (after every CONFIG_* key it references) to avoid a temporal-dead-zone error.
+export const CONFIG_LAYOUT_PRESET = 'layout_preset'; // persisted preset id ('' = none / manual)
+// Layout keys a preset may set. Nothing is locked — this list is used only to decide which editor
+// fields get the "changed from preset" indicator (and its revert action). See
+// (layout presets retired in v2026.09.24.145; see CHANGELOG.md)
+// Numbered layout presets derived from the reference dashboard views (view.yaml). Each captures the
+// LAYOUT of one card (orientation, control placements, area-menu + group arrangement) — NOT its
+// colors/styles and NOT the Cover Visual (image vs modern bar), which stay user choices.
+// Names are placeholders (Preset 1..4) and can be renamed later.
+
+// shared by the three "modern bar" style layouts (views shades-mod / shades2 / shades3)
+
+
+
+// Area Menu Style — a small bundle applied on top when Area Buttons are shown. Controls how the
+// area/label button menu is arranged relative to the covers. Independent of the core layout preset.
+
+// Bucket B — quick toggles (always user-editable; seeded per preset via preset.toggles).
+export const LAYOUT_TOGGLE_KEYS = [
+  CONFIG_SHOW_AREA_SELECTOR, CONFIG_AREA_PANELS, CONFIG_SHOW_DIVIDERS,
+];
+
+// Shared layout resolver used by BOTH the card runtime and the editor (so display + render never
+// diverge). Maps the legacy `show_cover_dividers` toggle onto the per-side model, then overlays the
+// active preset's bucket-A layout keys per the customize flag. Pure function. See
+// (layout presets retired in v2026.09.24.145; see CHANGELOG.md)
+// v2026.09.24.131: boolean-backed dropdowns written before v127 stored the STRING 'true'/'false'
+// (e.g. `area_buttons_row: 'false'`). A bare !! makes 'false' TRUTHY, so such a card behaves as if
+// the setting were ON. Coerce those strings back to real booleans for every key whose default is a
+// boolean, so old configs read correctly without the user having to re-pick anything.
+export function coerceLegacyBooleans(cfg){
+  if (!cfg || typeof cfg !== 'object') return cfg;
+  let out = null;
+  for (const k of Object.keys(cfg)) {
+    const v = cfg[k];
+    if ((v === 'true' || v === 'false') && typeof CONFIG_DEFAULT[k] === 'boolean') {
+      out = out || { ...cfg };
+      out[k] = (v === 'true');
+    }
+  }
+  return out || cfg;
+}
+export function resolveLayoutConfig(userConfig){
+  let cfg = coerceLegacyBooleans(userConfig || {});
+  // legacy: show_cover_dividers → ind_divider_left (between individuals) when no per-side set
+  if (cfg[CONFIG_SHOW_COVER_DIVIDERS] === true) {
+    const hasSide = cfg[CONFIG_IND_DIVIDER_LEFT] || cfg[CONFIG_IND_DIVIDER_RIGHT]
+      || cfg[CONFIG_IND_DIVIDER_TOP] || cfg[CONFIG_IND_DIVIDER_BOTTOM];
+    if (!hasSide) cfg = { ...cfg, [CONFIG_IND_DIVIDER_LEFT]: true };
+  }
+  // v145: no preset base layer any more — migrateConfig() bakes any legacy `layout_preset` into the
+  // config once, so there is nothing left to layer underneath and the user's config IS the config.
+  return cfg;
+}
+
 export const CONFIG_DEFAULT ={
   [CONFIG_SUPPORTED_FEATURES]: ESC_SUPPORTED_FEATURES,
   [CONFIG_TYPE]: "",
@@ -774,10 +955,14 @@ export const CONFIG_DEFAULT ={
   [CONFIG_STACKED]: ESC_STACKED,
 
   [CONFIG_LAYOUT]: ESC_LAYOUT,
+  [CONFIG_LAYOUT_PRESET]: '',
   [CONFIG_ORIENTATION]: ESC_ORIENTATION,
+  [CONFIG_PANEL_ROTATION]: PANEL_ROTATION_NORMAL,
   [CONFIG_SHOW_AREA_SELECTOR]: ESC_SHOW_AREA_SELECTOR,
   [CONFIG_GROUP_PLACEMENT]: ESC_GROUP_PLACEMENT,
   [CONFIG_AREA_MENU_INLINE]: ESC_AREA_MENU_INLINE,
+  [CONFIG_AREA_BUTTONS_ROW]: ESC_AREA_BUTTONS_ROW,
+  [CONFIG_AREA_BUTTONS_ROTATE]: ESC_AREA_BUTTONS_ROTATE,
   [CONFIG_GROUP_INLINE]: ESC_GROUP_INLINE,
   [CONFIG_GROUP_NAME_FROM_AREA]: ESC_GROUP_NAME_FROM_AREA,
   [CONFIG_COLLAPSE_LABEL]: ESC_COLLAPSE_LABEL,
@@ -789,6 +974,10 @@ export const CONFIG_DEFAULT ={
   [CONFIG_LABEL_NAMES]: null,
   [CONFIG_AREA_PRESETS]: null,
   [CONFIG_ENTITY_PRESETS]: null,
+  [CONFIG_COVER_STYLES]: null,
+  [CONFIG_COVER_STYLES_ENTITIES]: null,
+  [CONFIG_COVER_STYLE_DEFAULT]: '',
+  [CONFIG_GROUP_EXPAND]: null,
   [CONFIG_POSITION_PRESETS]: ESC_POSITION_PRESETS,
   [CONFIG_PARTIAL_BUTTONS_STYLE]: ESC_PARTIAL_BUTTONS_STYLE,
   [CONFIG_COVER_ORDER]: ESC_COVER_ORDER,
@@ -799,7 +988,8 @@ export const CONFIG_DEFAULT ={
   [CONFIG_STANDARD_ORIENTATION]: ESC_STANDARD_ORIENTATION,
   [CONFIG_PRESETS_ORIENTATION]: ESC_PRESETS_ORIENTATION,
   [CONFIG_ALL_LABEL]: ESC_ALL_LABEL,
-  [CONFIG_SHOW_ALL_CONTROL]: ESC_SHOW_ALL_CONTROL,
+  [CONFIG_AREA_PANELS]: null,
+  [CONFIG_SHOW_DIVIDERS]: true,
   [CONFIG_COVERS_COLLAPSIBLE]: ESC_COVERS_COLLAPSIBLE,
   [CONFIG_COVERS_START_COLLAPSED]: ESC_COVERS_START_COLLAPSED,
   [CONFIG_AREA_BUTTONS_DIR]: ESC_AREA_BUTTONS_DIR,
@@ -813,10 +1003,58 @@ export const CONFIG_DEFAULT ={
   [CONFIG_COVER_PAD_RIGHT]: ESC_COVER_PAD_RIGHT,
   [CONFIG_COVER_PAD_BOTTOM]: ESC_COVER_PAD_BOTTOM,
   [CONFIG_COVER_PAD_LEFT]: ESC_COVER_PAD_LEFT,
-  [CONFIG_COVERS_DIRECTION]: ESC_COVERS_DIRECTION,
+  [CONFIG_BUTTON_UP_HIDE]: false,
+  [CONFIG_BUTTON_DOWN_HIDE]: false,
+  [CONFIG_BUTTON_STOP_HIDE]: false,
+  [CONFIG_BUTTON_UP_STATE_COLOR]: 'var(--disabled-text-color)',
+  [CONFIG_BUTTON_DOWN_STATE_COLOR]: 'var(--disabled-text-color)',
+  [CONFIG_BUTTON_STOP_STATE_COLOR]: 'var(--disabled-text-color)',
+  [CONFIG_CONTROLS_BUTTON_GAP]: 0,
+  [CONFIG_CONTROLS_PAD_TOP]: 0,
+  [CONFIG_CONTROLS_PAD_RIGHT]: 6,
+  [CONFIG_CONTROLS_PAD_BOTTOM]: 0,
+  [CONFIG_CONTROLS_PAD_LEFT]: 0,
+  [CONFIG_PCT_BUTTON_GAP]: 4,
+  [CONFIG_PCT_PAD_TOP]: 0,
+  [CONFIG_PCT_PAD_RIGHT]: 0,
+  [CONFIG_PCT_PAD_BOTTOM]: 0,
+  [CONFIG_PCT_PAD_LEFT]: 0,
+  [CONFIG_LC_SHOW_TIME]: false,
+  [CONFIG_LC_SHOW_AGO]: false,
+  [CONFIG_LC_PLACEMENT]: 'bottom',
+  [CONFIG_LC_ALIGN]: 'center',
+  [CONFIG_LC_SIZE]: 0,
+  [CONFIG_LC_WEIGHT]: 'normal',
+  [CONFIG_LC_COLOR]: 'var(--secondary-text-color)',
+  [CONFIG_LC_COVER_GAP]: 0,
+  [CONFIG_GROUP_PAD_TOP]: 0,
+  [CONFIG_GROUP_PAD_RIGHT]: 0,
+  [CONFIG_GROUP_PAD_BOTTOM]: 0,
+  [CONFIG_GROUP_PAD_LEFT]: 0,
   [CONFIG_GROUP_WITH_COVERS]: ESC_GROUP_WITH_COVERS,
+  [CONFIG_GROUP_SCALE]: 100,
+  [CONFIG_AREA_BUTTONS_SCALE]: 100,
+  [CONFIG_COVERS_SCALE]: 100,
+  [CONFIG_CARD_BORDER]: 'theme',
+  [CONFIG_CARD_PAD_TOP]: CARD_PADDING, [CONFIG_CARD_PAD_RIGHT]: CARD_PADDING,
+  [CONFIG_CARD_PAD_BOTTOM]: CARD_PADDING, [CONFIG_CARD_PAD_LEFT]: CARD_PADDING,
+  [CONFIG_COLLAPSE_LINE]: true,
+  [CONFIG_COLLAPSE_GAP]: 12,
+  [CONFIG_COVERS_ALIGN]: 'start',
+  [CONFIG_AREA_BUTTONS_ALIGN]: 'start',
+  [CONFIG_CARD_BACKGROUND]: '',
+  [CONFIG_CARD_FRAME]: '',
+  [CONFIG_CARD_SCALE]: 100,
   [CONFIG_GROUP_STICKY]: ESC_GROUP_STICKY,
   [CONFIG_SHOW_COVER_DIVIDERS]: ESC_SHOW_COVER_DIVIDERS,
+  [CONFIG_GROUP_DIVIDER_LEFT]: false,
+  [CONFIG_GROUP_DIVIDER_RIGHT]: false,
+  [CONFIG_GROUP_DIVIDER_TOP]: false,
+  [CONFIG_GROUP_DIVIDER_BOTTOM]: false,
+  [CONFIG_IND_DIVIDER_LEFT]: false,
+  [CONFIG_IND_DIVIDER_RIGHT]: false,
+  [CONFIG_IND_DIVIDER_TOP]: false,
+  [CONFIG_IND_DIVIDER_BOTTOM]: false,
   [CONFIG_DIVIDER_STYLE]: ESC_DIVIDER_STYLE,
   [CONFIG_DIVIDER_COLOR]: ESC_DIVIDER_COLOR,
   [CONFIG_DIVIDER_THICKNESS]: ESC_DIVIDER_THICKNESS,
@@ -855,10 +1093,6 @@ export const CONFIG_DEFAULT ={
   [CONFIG_NAME_TEXT_SIZE]: ESC_NAME_TEXT_SIZE,
   [CONFIG_NAME_TEXT_WEIGHT]: ESC_NAME_TEXT_WEIGHT,
   [CONFIG_NAME_TEXT_COLOR]: ESC_NAME_TEXT_COLOR,
-  [CONFIG_POSITION_TEXT_SIZE]: ESC_POSITION_TEXT_SIZE,
-  [CONFIG_POSITION_TEXT_COLOR]: ESC_POSITION_TEXT_COLOR,
-  [CONFIG_POSITION_TEXT_WEIGHT]: ESC_POSITION_TEXT_WEIGHT,
-  [CONFIG_POSITION_BACKGROUND]: ESC_POSITION_BACKGROUND,
   [CONFIG_COVER_GAP]: ESC_COVER_GAP,
   [CONFIG_COLLAPSE_ICON]: '',
   [CONFIG_COLLAPSE_ICON_SIZE]: 0,
@@ -873,11 +1107,12 @@ export const CONFIG_DEFAULT ={
   [CONFIG_PCT_BUTTON_BG]: ESC_PCT_BUTTON_BG, [CONFIG_PCT_BUTTON_BORDER]: ESC_PCT_BUTTON_BORDER, [CONFIG_PCT_BUTTON_COLOR]: ESC_PCT_BUTTON_COLOR,
   [CONFIG_PCT_BUTTON_WEIGHT]: ESC_PCT_BUTTON_WEIGHT, [CONFIG_PCT_BUTTON_SIZE]: ESC_PCT_BUTTON_SIZE,
   [CONFIG_PCT_BUTTON_STYLE]: ESC_PCT_BUTTON_STYLE,
+  [CONFIG_NAME_COVER_GAP]: ESC_NAME_COVER_GAP,
+  [CONFIG_POS_COVER_GAP]: ESC_POS_COVER_GAP,
   [CONFIG_HEADER_IMAGE_GAP]: ESC_HEADER_IMAGE_GAP,
 
   [CONFIG_SHUTTER_PRESET]: ESC_SHUTTER_PRESET,
   [CONFIG_ENTITY_ID]: ESC_ENTITY_ID,
-  [CONFIG_SHOW_GROUP_MEMBERS]: ESC_SHOW_GROUP_MEMBERS,
 
   [CONFIG_BATTERY_ENTITY_ID]: ESC_BATTERY_ENTITY_ID,
   [CONFIG_SIGNAL_ENTITY_ID]: ESC_SIGNAL_ENTITY_ID,
@@ -895,6 +1130,7 @@ export const CONFIG_DEFAULT ={
   [CONFIG_PANEL_POS_END]: ESC_PANEL_POS_END,
   [CONFIG_MODERN_TRAVEL]: ESC_MODERN_TRAVEL,
   [CONFIG_MODERN_SECOND_ENTITY]: ESC_MODERN_SECOND_ENTITY,
+  [CONFIG_TDBU_TOP_ENTITIES]: ESC_TDBU_TOP_ENTITIES,
   [CONFIG_IMAGE_MAP]: ESC_IMAGE_MAP,
   [CONFIG_WINDOW_IMAGE]: ESC_IMAGE_WINDOW,
   [CONFIG_VIEW_IMAGE]: ESC_IMAGE_VIEW,
@@ -914,12 +1150,10 @@ export const CONFIG_DEFAULT ={
   [CONFIG_OFFSET_CLOSED_PCT]: ESC_CLOSED_OFFSET_PCT,
   [CONFIG_BUTTONS_POSITION]: ESC_BUTTONS_POSITION,
   [CONFIG_NAME_POSITION]: ESC_NAME_POSITION,
-  [CONFIG_OPENING_POSITION]: ESC_OPENING_POSITION,
   [CONFIG_ICONS_POSITION]: ESC_ICONS_POSITION,
-  [CONFIG_INLINE_HEADER]: ESC_INLINE_HEADER,
-  [CONFIG_HEADER_ALIGN]: ESC_HEADER_ALIGN,
-  [CONFIG_HEADER_ORDER]: ESC_HEADER_ORDER,
-  [CONFIG_HEADER_GAP]: ESC_HEADER_GAP,
+  [CONFIG_HEADER_ON_COVER]: ESC_HEADER_ON_COVER,
+  [CONFIG_NAME_ALIGN]: ESC_NAME_ALIGN,
+  [CONFIG_POS_ALIGN]: ESC_POS_ALIGN,
 
   [CONFIG_INVERT_PCT]   : ESC_INVERT_PCT_UI,
   [CONFIG_INVERT_PCT_UI]   : ESC_INVERT_PCT_UI,
@@ -942,13 +1176,11 @@ export const CONFIG_DEFAULT ={
   [CONFIG_DISABLE_END_BUTTONS]: ESC_DISABLE_END_BUTTONS,
 // ===================
   [CONFIG_NAME_DISABLED]: ESC_NAME_DISABLED,   // deprecated
-  [CONFIG_OPENING_DISABLED]: ESC_OPENING_DISABLED,  // deprecated
   [CONFIG_TILT_SLIDER_ONLY]: ESC_TILT_SLIDER_ONLY, // deprecated
   [CONFIG_DISABLE_STANDARD_BUTTONS]: ESC_DISABLE_STANDARD_BUTTONS, // deprecated
   [CONFIG_DISABLE_PARTIAL_OPEN_BUTTONS]: ESC_DISABLE_PARTIAL_OPEN_BUTTONS, // deprecated
 
   [CONFIG_SHOW_NAME]: ESC_SHOW_NAME, // replace
-  [CONFIG_SHOW_OPENING]: ESC_SHOW_OPENING, // replace
   [CONFIG_SHOW_TILT_BUTTONS]: ESC_SHOW_TILT_BUTTONS, // replace
   [CONFIG_SHOW_STANDARD_BUTTONS]: ESC_SHOW_STANDARD_BUTTONS, // replace
   [CONFIG_SHOW_PARTIAL_OPEN_BUTTONS]: ESC_SHOW_PARTIAL_OPEN_BUTTONS, // replace
@@ -986,8 +1218,8 @@ export const ESC_PRESET = {
   [ESC_AWNING]: {
     [CONFIG_INVERT_OPEN_CLOSE_UI]: true,
     [CONFIG_INVERT_PCT_UI]: true,
-    [CONFIG_SHUTTER_SLAT_IMAGE]: 'esc-awning.png',
-    [CONFIG_SHUTTER_BOTTOM_IMAGE]: 'esc-awning-bottom.png',
+    [CONFIG_SHUTTER_SLAT_IMAGE]: 'slats/awning.png',
+    [CONFIG_SHUTTER_BOTTOM_IMAGE]: 'bottoms/awning-bottom.png',
     [CONFIG_ROTATE_SLATS_SHUTTER_IMAGE]: true,
     [CONFIG_STRETCH_EDGE_SHUTTER_IMAGE]: false,
     [CONFIG_OFFSET_CLOSED_PCT]: 50,
@@ -995,7 +1227,7 @@ export const ESC_PRESET = {
   },
   [ESC_CURTAIN]: {
     [CONFIG_CLOSING_DIRECTION]: RIGHT,
-    [CONFIG_SHUTTER_SLAT_IMAGE]: 'esc-curtain.png',
+    [CONFIG_SHUTTER_SLAT_IMAGE]: 'slats/curtain.png',
     [CONFIG_SHUTTER_BOTTOM_IMAGE]: '',
     [CONFIG_ROTATE_SLATS_SHUTTER_IMAGE]: false,
   },
@@ -1006,7 +1238,7 @@ export const ESC_PRESET = {
   },
   // Insect/window screen: fine semi-transparent mesh, like a shade but see-through.
   [ESC_SCREEN]: {
-    [CONFIG_SHUTTER_SLAT_IMAGE]: 'esc-screen.png',
+    [CONFIG_SHUTTER_SLAT_IMAGE]: 'slats/screen.png',
     [CONFIG_SHUTTER_BOTTOM_IMAGE]: '',
     [CONFIG_ROTATE_SLATS_SHUTTER_IMAGE]: false,
     [CONFIG_STRETCH_EDGE_SHUTTER_IMAGE]: false,
@@ -1015,21 +1247,20 @@ export const ESC_PRESET = {
   },
   [ESC_BLIND]: {
     [CONFIG_CLOSING_DIRECTION]: RIGHT,
-    [CONFIG_SHUTTER_SLAT_IMAGE]: 'esc-blind.png',
+    [CONFIG_SHUTTER_SLAT_IMAGE]: 'slats/blind.png',
     [CONFIG_ROTATE_SLATS_SHUTTER_IMAGE]: false,
-    [CONFIG_WINDOW_IMAGE]: 'esc-window2.png',
+    [CONFIG_WINDOW_IMAGE]: 'frames/window2.png',
     [CONFIG_SHUTTER_BOTTOM_IMAGE]: '',
   },
   [ESC_TEST]: {
     [CONFIG_WINDOW_IMAGE]: '',
     [CONFIG_OFFSET_OPENED_PCT]: 2,
-    [CONFIG_SHUTTER_SLAT_IMAGE]: 'rode_rechthoek.png',
-    [CONFIG_SHUTTER_BOTTOM_IMAGE]: 'gele_rechthoek.png',
+    [CONFIG_SHUTTER_SLAT_IMAGE]: 'slats/rode_rechthoek.png',
+    [CONFIG_SHUTTER_BOTTOM_IMAGE]: 'bottoms/gele_rechthoek.png',
     [CONFIG_NAME]: 'Test',
   },
   [ESC_COMPACT]: {
     [CONFIG_SHOW_NAME]: true,
-    [CONFIG_SHOW_OPENING]: true,
     [CONFIG_SHOW_STANDARD_BUTTONS]: true,
     [CONFIG_SHOW_WINDOW]: false,
     [CONFIG_SHOW_TILT_BUTTONS]: true,
@@ -1039,21 +1270,21 @@ export const ESC_PRESET = {
   },
   // Roller shutter over a window frame with a city view behind (art from pic-shutter-card).
   [ESC_WINDOW]: {
-    [CONFIG_WINDOW_IMAGE]: 'psc-frame_window.png',
-    [CONFIG_VIEW_IMAGE]: 'psc-outside_window.png',
+    [CONFIG_WINDOW_IMAGE]: 'frames/frame_window.png',
+    [CONFIG_VIEW_IMAGE]: 'views/outside_window.png',
     [CONFIG_CLOSING_DIRECTION]: DOWN,
   },
   // Balcony door as the backdrop; the roller shutter rolls down over it. Door art is a tall ~233x610 image.
   [ESC_BALCONY_L]: {
     [CONFIG_WINDOW_IMAGE]: '',
-    [CONFIG_VIEW_IMAGE]: 'psc-pic_balcon_l.png',
+    [CONFIG_VIEW_IMAGE]: 'views/pic_balcon_l.png',
     [CONFIG_BASE_WIDTH_PX]: 150,
     [CONFIG_BASE_HEIGHT_PX]: 393,
     [CONFIG_CLOSING_DIRECTION]: DOWN,
   },
   [ESC_BALCONY_R]: {
     [CONFIG_WINDOW_IMAGE]: '',
-    [CONFIG_VIEW_IMAGE]: 'psc-pic_balcon_r.png',
+    [CONFIG_VIEW_IMAGE]: 'views/pic_balcon_r.png',
     [CONFIG_BASE_WIDTH_PX]: 150,
     [CONFIG_BASE_HEIGHT_PX]: 393,
     [CONFIG_CLOSING_DIRECTION]: DOWN,
@@ -1064,53 +1295,65 @@ export const ESC_PRESET = {
 // { value: filename, label: friendly description } — the editor shows the label so the
 // picker is readable. esc-* ship with the card; psc-* are from pic-shutter-card (used with permission).
 export const BUNDLED_WINDOW_IMAGES = [
-  { value: 'esc-window.png',        label: 'Window frame — grey' },
-  { value: 'esc-window2.png',       label: 'Window frame — brown' },
-  { value: 'esc-window3.png',       label: 'Window frame — green' },
-  { value: 'psc-frame_window.png',  label: 'Window frame — white, with roller box' },
-  { value: 'psc-frame_win1.png',    label: 'Window frame — white, style 1' },
-  { value: 'psc-frame_win1_2.png',  label: 'Window frame — white, style 1b' },
-  { value: 'psc-frame_win2.png',    label: 'Window frame — white, style 2' },
+  { value: 'frames/window.png',        label: 'Window frame — grey' },
+  { value: 'frames/window2.png',       label: 'Window frame — brown' },
+  { value: 'frames/window3.png',       label: 'Window frame — green' },
+  { value: 'frames/window-grey.png',   label: 'Window frame — mid grey' },
+  { value: 'frames/window-black.png',  label: 'Window frame — black' },
+  { value: 'frames/frame_window.png',  label: 'Window frame — white, with roller box' },
+  { value: 'frames/frame-window-grey.png',  label: 'Window frame — grey, with roller box' },
+  { value: 'frames/frame-window-black.png', label: 'Window frame — black, with roller box' },
+  { value: 'frames/frame_win1.png',    label: 'Window frame — white, style 1' },
+  { value: 'frames/frame_win1_2.png',  label: 'Window frame — white, style 1b' },
+  { value: 'frames/frame_win2.png',    label: 'Window frame — white, style 2' },
 ];
 export const BUNDLED_VIEW_IMAGES = [
-  { value: 'esc-view.png',            label: 'Background view — 1' },
-  { value: 'esc-view2.png',           label: 'Background view — 2' },
-  { value: 'psc-outside_window.png',  label: 'Outside — city skyline at dusk' },
-  { value: 'psc-outside_window1.png', label: 'Outside — scene 1' },
-  { value: 'psc-outside_window2.png', label: 'Outside — scene 2' },
-  { value: 'psc-outside_window3.png', label: 'Outside — scene 3' },
-  { value: 'psc-outside_window4.png', label: 'Outside — scene 4' },
-  { value: 'psc-outside_window5.png', label: 'Outside — scene 5' },
-  { value: 'psc-outwin1.png',         label: 'Outside — window scene 1' },
-  { value: 'psc-outwin2.png',         label: 'Outside — window scene 2' },
-  { value: 'psc-outwin3.png',         label: 'Outside — window scene 3' },
-  { value: 'psc-pic_balcon_l.png',    label: 'Balcony door — left' },
-  { value: 'psc-pic_balcon_r.png',    label: 'Balcony door — right' },
+  { value: 'views/view.png',            label: 'Background view — 1' },
+  { value: 'views/view2.png',           label: 'Background view — 2' },
+  { value: 'views/outside_window.png',  label: 'Outside — city skyline at dusk' },
+  { value: 'views/outside_window1.png', label: 'Outside — scene 1' },
+  { value: 'views/outside_window2.png', label: 'Outside — scene 2' },
+  { value: 'views/outside_window3.png', label: 'Outside — scene 3' },
+  { value: 'views/outside_window4.png', label: 'Outside — scene 4' },
+  { value: 'views/outside_window5.png', label: 'Outside — scene 5' },
+  { value: 'views/outwin1.png',         label: 'Outside — window scene 1' },
+  { value: 'views/outwin2.png',         label: 'Outside — window scene 2' },
+  { value: 'views/outwin3.png',         label: 'Outside — window scene 3' },
+  { value: 'views/pic_balcon_l.png',    label: 'Balcony door — left' },
+  { value: 'views/pic_balcon_r.png',    label: 'Balcony door — right' },
 ];
+// v2026.09.24.136: the solid-colour PNGs and the fixed '#00000080' Shade tint are gone — a flat
+// colour needs no image file, and three baked PNGs could never cover the colours people want. The
+// slat field takes a colour directly (the renderer already paints a non-filename value), so the
+// image picker now offers a full Custom Colour mode instead.
 export const BUNDLED_SLAT_IMAGES = [
-  { value: 'esc-shutter-slat.png',  label: 'Roller shutter slat — grey' },
-  { value: 'esc-shutter-slat2.png', label: 'Roller shutter slat — brown' },
-  { value: 'esc-shutter-slat3.png', label: 'Roller shutter slat — green' },
-  { value: 'esc-awning.png',        label: 'Awning fabric — red/white' },
-  { value: 'esc-curtain.png',       label: 'Curtain — red' },
-  { value: 'esc-blind.png',         label: 'Venetian blind slats' },
-  { value: '#00000080',             label: 'Shade — dark tint (semi-transparent)' },
-  { value: 'esc-screen.png',        label: 'Window screen mesh (semi-transparent)' },
-  { value: 'esc-screen2.png',       label: 'Window screen mesh — dense (semi-transparent)' },
-  { value: 'psc-art.png',           label: 'Curtain art — abstract' },
-  { value: 'psc-art1.png',          label: 'Curtain art — abstract 1' },
-  { value: 'psc-art3.png',          label: 'Curtain art — abstract 3' },
-  { value: 'psc-art4.png',          label: 'Curtain art — abstract 4' },
-  { value: 'psc-art_city.png',      label: 'Curtain art — city' },
-  { value: 'psc-purple.png',        label: 'Solid colour — purple' },
-  { value: 'psc-liteblue.png',      label: 'Solid colour — light blue' },
-  { value: 'psc-litegreen.png',     label: 'Solid colour — light green' },
+  { value: 'slats/shutter-slat.png',  label: 'Roller shutter slat — grey' },
+  { value: 'slats/shutter-slat2.png', label: 'Roller shutter slat — brown' },
+  { value: 'slats/shutter-slat3.png', label: 'Roller shutter slat — green' },
+  { value: 'slats/awning.png',        label: 'Awning fabric — red/white' },
+  { value: 'slats/shutter-slat-mid.png',   label: 'Roller shutter slat — mid grey' },
+  { value: 'slats/shutter-slat-dark.png',  label: 'Roller shutter slat — dark grey' },
+  { value: 'slats/shutter-slat-black.png', label: 'Roller shutter slat — black' },
+  { value: 'slats/curtain.png',       label: 'Curtain — red' },
+  { value: 'slats/curtain-grey.png',  label: 'Curtain — grey' },
+  { value: 'slats/curtain-black.png', label: 'Curtain — black' },
+  { value: 'slats/blind.png',         label: 'Venetian blind slats' },
+  { value: 'slats/screen.png',        label: 'Window screen mesh (semi-transparent)' },
+  { value: 'slats/screen2.png',       label: 'Window screen mesh — dense (semi-transparent)' },
+  { value: 'slats/art.png',           label: 'Curtain art — abstract' },
+  { value: 'slats/art1.png',          label: 'Curtain art — abstract 1' },
+  { value: 'slats/art3.png',          label: 'Curtain art — abstract 3' },
+  { value: 'slats/art4.png',          label: 'Curtain art — abstract 4' },
+  { value: 'slats/art_city.png',      label: 'Curtain art — city' },
 ];
 export const BUNDLED_BOTTOM_IMAGES = [
-  { value: 'esc-shutter-bottom.png',  label: 'Roller bottom bar — grey' },
-  { value: 'esc-shutter-bottom2.png', label: 'Roller bottom bar — brown' },
-  { value: 'esc-shutter-bottom3.png', label: 'Roller bottom bar — green' },
-  { value: 'esc-awning-bottom.png',   label: 'Awning bottom bar' },
+  { value: 'bottoms/shutter-bottom.png',  label: 'Roller bottom bar — grey' },
+  { value: 'bottoms/shutter-bottom2.png', label: 'Roller bottom bar — brown' },
+  { value: 'bottoms/shutter-bottom3.png', label: 'Roller bottom bar — green' },
+  { value: 'bottoms/shutter-bottom-mid.png',   label: 'Roller bottom bar — mid grey' },
+  { value: 'bottoms/shutter-bottom-dark.png',  label: 'Roller bottom bar — dark grey' },
+  { value: 'bottoms/shutter-bottom-black.png', label: 'Roller bottom bar — black' },
+  { value: 'bottoms/awning-bottom.png',   label: 'Awning bottom bar' },
 ];
 export const ICON_MARGIN_LR = 3;
 export const ICON_MARGIN_TB = 8;
@@ -1126,12 +1369,23 @@ export const SHUTTER_CSS =`
         overflow: visible;
         position: relative;
       }
+      /* v2026.09.24.84 (Option A): in-place panel rotation. CSS transforms are post-layout, so the
+         wrapper can't auto-reserve the swapped footprint — EnhancedShutter.#applyRotationSizing()
+         measures the inner content (offsetWidth/Height, pre-transform) and sets .ecs-rot's explicit
+         swapped width/height + the inner's translate. Corner-rotation (transform-origin: top left)
+         keeps the math simple. */
+      .ecs-rot { position: relative; display: inline-block; }
+      .ecs-rot-inner {
+        position: absolute; top: 0; left: 0;
+        width: max-content;
+        transform-origin: top left;
+      }
       .${ESC_CLASS_MIDDLE} {
         display: flex;
         flex-flow: var(--esc-flex-flow-middle);
         justify-content: center;
         align-items: center;
-        gap: var(--esc-controls-gap, 0px);
+        gap: 0;   /* v166: spacing now lives on the button group's own padding */
         padding: var(--esc-header-image-gap, 0px) 0;
         max-width: 100%;
         max-height: 100%;
@@ -1144,7 +1398,9 @@ export const SHUTTER_CSS =`
         justify-content: center;
         align-items: center;
         max-width: 100%;
-        margin: var(--esc-controls-btn-margin, 0);
+        gap: var(--esc-controls-btn-gap, 0px);
+        padding: var(--esc-controls-pad, 0 6px 0 0);
+        box-sizing: content-box;
       }
       .${ESC_CLASS_TILT_BUTTONS} {
         display: flex;
@@ -1168,7 +1424,14 @@ export const SHUTTER_CSS =`
         gap: 4px;
         margin: 2px 0;
       }
-      .esc-shutter-pos-side {
+      /* v2026.09.24.152: the name placed beside the cover (left/right) — same shape as the readout. */
+      .esc-shutter-name-side {
+        align-self: center;
+        text-align: center;
+        white-space: nowrap;
+        padding: 2px 4px;
+      }
+      .esc-shutter-pos-side, .esc-shutter-lc-side {
         align-self: center;
         text-align: center;
         white-space: nowrap;
@@ -1196,6 +1459,14 @@ export const SHUTTER_CSS =`
         width: min-content;
       }
       .${ESC_CLASS_SELECTOR} {
+        /* v2026.09.24.153: the view image is this element's background. v150 sized the background to
+           the frame, which was not enough — the frame picture also carries max-width:100%, so in a
+           narrow panel the picture shrinks while the background does not. Sizing the CONTAINER to the
+           frame fixes it at the root: the background can no longer be larger than the box it paints
+           into, whatever the panel does. */
+        width: var(--esc-window-width);
+        height: var(--esc-window-height);
+        box-sizing: border-box;
         max-width: 100%;
         margin: ${SELECTOR_MARGIN}px;
         justify-content: center;
@@ -1204,9 +1475,19 @@ export const SHUTTER_CSS =`
         overflow: var(--esc-overflow); /* prevents image overflow */
         background-color: var(--esc-window-background-color);
         background-image: var(--esc-window-background-image);
-        background-size: cover;
+        /* v2026.09.24.150: the view image is this container's BACKGROUND, but the container has no
+           explicit size — it grows to fit its contents — while the window frame picture inside is
+           exactly --esc-window-width x --esc-window-height. With cover-sizing the background filled the
+           whole container, so whenever the container was taller/wider than the frame the outdoor
+           view bled past the frame's edges. Paint it at exactly the frame's size instead, centred to
+           match the frame picture (which is centred by justify-content/align-items). */
+        background-size: var(--esc-window-width) var(--esc-window-height);
+        background-repeat: no-repeat;
         background-position: center;
         flex: none;
+      }
+      .${ESC_CLASS_SELECTOR}[data-art] {
+        background: none;
       }
       .${ESC_CLASS_SELECTOR}.esc-modern {
         background: none;
@@ -1368,18 +1649,61 @@ export const SHUTTER_CSS =`
       .${ESC_CLASS_TOP}, .${ESC_CLASS_BOTTOM} {
         display: flex;
         flex: 1 1 auto;
-        flex-flow: var(--esc-flex-name_opening-flow);
+        flex-flow: row nowrap;   /* v154: name only; horizontal alignment is set inline from name_align */
         align-items: center;
-        justify-content: var(--esc-header-align, center);
-        gap: var(--esc-header-gap, 0px);
+        justify-content: center;
         white-space: nowrap;
         position: relative;
         text-align: center;
-        padding-top: calc(${8}px*var(--esc-text-scale));
-        padding-bottom: calc(${8}px*var(--esc-text-scale));
+        /* v2026.09.24.153: was a baked-in 8px top AND bottom, so the name always sat ~16px off the
+           cover with no way to remove it. Default 0 — the Name section's gap slider is now the only
+           thing that puts space there. */
+        padding-top: 0;
+        padding-bottom: 0;
       }
+      /* v2026.09.24.154: Name / Readout ANCHORED to the cover (Align to Cover, cover in a row).
+         The middle row becomes a 3-row grid. Every ordinary item sits in row 2; the cover's cell spans
+         rows 1-3 and is a SUBGRID, so its top/bottom text shares rows 1 and 3 without adding height to
+         row 2 - the buttons beside the cover stay centred on the cover itself. Replaces the v134/v153
+         padding offset, which only knew about one column of movement buttons. */
+      .${ESC_CLASS_MIDDLE}.esc-mid-anchored {
+        display: grid;
+        grid-auto-flow: column;
+        grid-template-rows: auto auto auto;
+        row-gap: 0;
+        column-gap: 0;
+        justify-content: center;
+        align-items: center;
+      }
+      .esc-mid-anchored > * { grid-row: 2; }
+      .esc-mid-anchored > .esc-cover-anchor {
+        grid-row: 1 / 4;
+        display: grid;
+        grid-template-rows: subgrid;
+        align-items: center;
+      }
+      .esc-cover-anchor > * { grid-row: 2; }
+      .esc-cover-anchor > .esc-anchor-top { grid-row: 1; align-self: end; }
+      .esc-cover-anchor > .esc-anchor-bottom { grid-row: 3; align-self: start; }
+      /* width 0 + min-width 100%: the text never widens the cover's column, it just overflows it.
+         Inset by the window's own margin so Left/Right line up with the frame, not 4px outside it. */
+      .esc-anchor-top, .esc-anchor-bottom {
+        width: 0;
+        min-width: 100%;
+        box-sizing: border-box;
+        padding: 0 ${SELECTOR_MARGIN}px;
+        display: flex;
+        flex-direction: column;
+      }
+      .esc-anchor-line {
+        display: flex;
+        align-items: center;
+        white-space: nowrap;
+      }
+      .esc-shutter-middle-stack > .esc-anchor-line { align-self: stretch; }
       .${ESC_CLASS_LABEL} {
         clear: both;
+        margin-bottom: var(--esc-name-cover-gap, 0px);
         font-size: var(--esc-name-font-size, calc(${FONT_SIZE_LABEL}px*var(--esc-text-scale)));
         font-weight: var(--esc-name-font-weight, inherit);
         color: var(--esc-name-color, inherit);
@@ -1393,22 +1717,6 @@ export const SHUTTER_CSS =`
       }
       .${ESC_CLASS_TITLE_DISABLED} {
         display: none;
-      }
-      .${ESC_CLASS_POSITION} {
-        vertical-align: top;
-        clear: both;
-        color: var(--esc-position-color, inherit);
-        font-weight: var(--esc-position-weight, inherit);
-        font-size: var(--esc-position-font-size, calc(${FONT_SIZE_POSITION}px*var(--esc-text-scale)));
-        line-height: calc(${LINE_HEIGHT_POSITION}px*var(--esc-text-scale));
-        height:      calc(${LINE_HEIGHT_POSITION}px*var(--esc-text-scale));
-        border-radius: 5px;
-        margin: ${MARGIN_POSITION}px;
-
-      }
-      .${ESC_CLASS_POSITION}>span {
-        background-color: var(--esc-position-bg, transparent);
-        padding: 2px 5px 2px 5px;
       }
       .${ESC_CLASS_HA_ICON} {
         padding-bottom: 10px;
@@ -1496,10 +1804,15 @@ export const SHUTTER_CSS =`
     }
 
     /* v1.22.0: value-label position buttons (#7) */
+    /* v169: position buttons own their spacing, overriding the directional group's vars that the
+       shared ESC_CLASS_BUTTONS container would otherwise apply to them */
+    .esc-shutter-pct-values, .esc-shutter-pct-icons {
+      gap: calc(var(--esc-button-scale)*var(--esc-pct-btn-gap, 4px));
+      padding: var(--esc-pct-pad, 0);
+    }
     .esc-shutter-pct-values {
       display: flex;
       flex-wrap: wrap;
-      gap: calc(var(--esc-button-scale)*4px);
       align-content: center;
       justify-content: center;
     }

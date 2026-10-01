@@ -2,6 +2,7 @@ import {html} from './lit/lit-core.min.js';
 import * as C from './constants.js';
 import {htmlShutter} from './htmlShutter.js';
 import {xyPair} from './xyPair.js';
+import {classicArt} from './coverArt.js';
 import {normalizeIcon} from './dividers.js';
 import {resolveButtonAppearance, areaButtonStyle} from './buttonStyles.js';
 import {resolveModernStyle, modernFillPaint, modernFillOpacity, modernTrackColor, modernBarGlow, modernHandleStyle} from './modernStyles.js';
@@ -65,8 +66,10 @@ export class htmlBlock
     const signalHere = this.cfg.signalIconActive() && this.cfg.signalPositionEff() === position;
     const bAlign = this.cfg.batteryAlign();
     const sAlign = this.cfg.signalAlign();
+    // v154: the name takes the left/centre/right cell chosen by name_align
+    const nameCell = this.cfg.nameAlignCell();
     const cell = (align) => html`
-      ${align === 'center' ? nameAndStateBlock.show(position) : ''}
+      ${align === nameCell ? nameAndStateBlock.show(position) : ''}
       ${batteryHere && bAlign === align ? batteryIconBlock.show() : ''}
       ${signalHere && sAlign === align ? signalIconBlock.show() : ''}
     `;
@@ -126,15 +129,29 @@ export class htmlBlockShutter extends htmlBlock{
     const middleBlock = new htmlBlockMiddle(this.shutter);
     const bottomBlock = new htmlBlockBottom(this.shutter);
 
+    // v2026.09.24.84 (Option A): rotate the panel content in place. The rotation lives INSIDE the
+    // panel so the outer .esc-shutter box auto-sizes to the rotated content's swapped footprint —
+    // sibling covers/containers then lay out around a correctly-sized panel (no overlap). CSS-only:
+    // .ecs-rot gets writing-mode:vertical-* (swaps its layout box w<->h); .ecs-rot-inner resets
+    // writing-mode and applies the visual 90° turn. See .ecs-rot rules in SHUTTER_CSS.
+    const rotation = this.cfg.panelRotation ? this.cfg.panelRotation() : C.PANEL_ROTATION_NORMAL;
+    const rotated = rotation === C.PANEL_ROTATION_LEFT || rotation === C.PANEL_ROTATION_RIGHT;
+    const content = html`
+      ${topBlock.show()}
+      ${middleBlock.show()}
+      ${bottomBlock.show()}
+    `;
+    const body = rotated
+      ? html`<div class="ecs-rot" data-rotation=${rotation}><div class="ecs-rot-inner">${content}</div></div>`
+      : content;
+
     this.setHtmlString(html`
       <div
         class=${C.ESC_CLASS_SHUTTER}
         data-shutter="${entityId}"
         style = "${htmlParts.defStyleVarsShutter()}"
       >
-        ${topBlock.show()}
-        ${middleBlock.show()}
-        ${bottomBlock.show()}
+        ${body}
       </div>
     `);
 
@@ -269,38 +286,31 @@ export class htmlBlockNameAndState extends htmlBlock{
 
   show(position=C.TOP){
     const escClassName = position === C.TOP ? C.ESC_CLASS_TOP : C.ESC_CLASS_BOTTOM;
-    const stateBlock= new htmlBlockState(this.shutter);
+    // v2026.09.24.152: this row now carries the NAME only. It used to render a SECOND position text
+    // alongside it, with its own size/weight/colour/order/gap keys — a duplicate of Position Readout,
+    // which is the richer system (9 placements, handle-attached variants). Position Readout is now the
+    // single way position is shown; header_order / header_gap / position_text_* / show_opening and the
+    // header's own state block are gone with it.
     const nameBlock = new htmlBlockName(this.shutter);
-    // "same line": force name + position together at the name's location (works top or bottom)
-    const inline = this.cfg.inlineHeader();
-    const nameHere = this.cfg.namePosition() === position;
-    const stateHere = inline ? nameHere : (this.cfg.openingPosition() === position);
+    // v2026.09.24.154: when anchored to the cover the name renders inside the cover's own column
+    // (htmlBlockMiddle), so the header row leaves it out. That replaces the v134/v153 padding offset,
+    // which assumed exactly one column of movement buttons beside the cover.
+    const anchored = !!(this.cfg.coverAnchored && this.cfg.coverAnchored());
+    const nameHere = this.cfg.namePosition() === position && !anchored;
     const nameEl = nameHere ? nameBlock.show() : html``;
-    const stateEl = stateHere ? stateBlock.show() : html``;
-    const positionFirst = this.cfg.headerOrder() === 'position';
     return html`
-      <div class = "${escClassName}">
-        ${positionFirst ? stateEl : nameEl}
-        ${positionFirst ? nameEl : stateEl}
+      <div class = "${escClassName}" style="justify-content:${this.cfg.alignFlex(this.cfg.nameAlign())};">
+        ${nameEl}
       </div>
     `;
   }
   size(position=C.TOP){
 
-    const stateBlock= new htmlBlockState(this.shutter);
+    // v2026.09.24.152: the header row holds the NAME only now, so its size must not reserve space for
+    // the retired position text (that would leave a permanent blank strip).
     const nameBlock = new htmlBlockName(this.shutter);
-
-    let xyName = this.cfg.openingPosition() === position ? nameBlock.size() : new xyPair();
-    let xyState = this.cfg.namePosition() === position ? stateBlock.size() : new xyPair();
-    let xy;
-    if (this.cfg.inlineHeader()){
-       xy = this.gridAddHorizontal(xyName,xyState);
-    }else{
-       xy = this.gridAddVertical(xyName,xyState);
-    }
-    xy = this.gridAddVertical(xy,new xyPair(0,16)); // padding = 16
-    // TODO: Only margin if size is available
-    // xy = xy.size() ? this.gridAddVertical(xy,new xyPair(0,16)) : xy; // padding = 16
+    let xy = this.cfg.namePosition() === position ? nameBlock.size() : new xyPair();
+    xy = this.gridAddVertical(xy, new xyPair(0, 16)); // padding = 16
     this.displaySize(xy);
     return xy;
   }
@@ -341,51 +351,6 @@ export class htmlBlockName extends htmlBlock{
       }
     }
     this.setXySize(xy);
-  }
-}
-export class htmlBlockState extends htmlBlock{
-  defineHtml(){
-    const positionText =this.cfg.computePositionText(this.actualShutterPosition,this.actualTiltPosition);
-
-    this.setHtmlString(html`
-      ${this.cfg.showOpening()
-        ? html`
-          <div class="${C.ESC_CLASS_POSITION} ${this.cfg.disabledGlobaly() ? `${C.ESC_CLASS_LABEL_DISABLED}` : ''}">
-            <span style="white-space: pre-line;">${positionText}</span>
-          </div>`
-        : html``
-     }
-    `);
-  }
-  defineSize(){
-      let text="";
-      //let x=0;
-      let y1 = C.LINE_HEIGHT_POSITION * this.cfg.textScaleFactor() + 2*C.MARGIN_POSITION;  // including margin
-      const shutterTitleHeight = C.FONT_SIZE_POSITION * this.cfg.textScaleFactor();
-      if (this.cfg.alwaysPercentage()) {
-        text += (100).toFixed(C.DISPLAY_DECIMALS) + '%';
-          //console.log(text, this.stateSize);
-      }else{
-        let maxSize=0;
-        let maxText="";
-        C.SHUTTER_STATES.forEach(state => {
-          let text1 = this.cfg.getLocalize(C.LOCALIZE_TEXT[state]);
-          let size = getTextSize(text1,C.HA_TITLE_FONT,shutterTitleHeight,'400').width;
-          if (size>maxSize) {
-            maxSize = size;
-            maxText = text1;
-          }
-        });
-        text += maxText;
-      }
-      if (this.cfg.canTilt()){
-        text += ' / Tilt: ' + (100).toFixed(C.DISPLAY_DECIMALS) + '%';
-        //console.log(text, size);
-      }
-      this.text=text;
-      let size =getTextSize(text,C.HA_TITLE_FONT,shutterTitleHeight,'400').width;
-      let xy = new xyPair(size,y1);
-      this.setXySize(xy);
   }
 }
 export class htmlBlockTop extends htmlBlock{
@@ -436,29 +401,102 @@ export class htmlBlockMiddle extends htmlBlock{
       if (sideOf[k] === C.BOTTOM) { bottom.push(segments[k]); return false; }
       return true; // window + before/after stay in the middle flex
     });
+    const windowEl = segments[C.COVER_SEG_WINDOW];
     const midEls = midOrder.map(k => segments[k] || html``);
+    // v2026.09.24.154: cross-axis alignment for the Name and the Position Readout.
+    //   placed top/bottom  -> Left / Center / Right   (justify along the row)
+    //   placed left/right  -> Top / Middle / Bottom   (align-self in the cover row)
+    // "Align to Cover" (header_on_cover) with the cover in a row: top/bottom items are ANCHORED to the
+    // cover's own column (grid below), so Left/Center/Right are measured against the cover's edges no
+    // matter what sits beside it. This replaces the v153 padding offset, which only compensated for
+    // one column of movement buttons and ignored presets/slider/tilt/side items entirely.
+    const anchored = !!(this.cfg.coverAnchored && this.cfg.coverAnchored());
+    const anchorTop = [], anchorBottom = [];   // outer item first (top) / inner item first (bottom)
+    const topLines = [], bottomLines = [];     // panel-wide rows for non-centre alignment when not anchored
+    const line = (el, align) => html`<div class="esc-anchor-line" style="justify-content:${this.cfg.alignFlex(align)};">${el}</div>`;
+    const sideStyle = (align) => `align-self:${this.cfg.alignFlex(align)};`;
+
     // Position readout placed on a side of the image (top/bottom/left/right) — a standalone element
     const posPlace = this.cfg.effectivePositionPlacement ? this.cfg.effectivePositionPlacement() : 'default';
     if ([C.TOP, C.BOTTOM, C.LEFT, C.RIGHT].includes(posPlace)){
+      const pAlign = this.cfg.posAlign();
       const txt = this.cfg.computePositionText(this.shutter.actualShutterPosition, this.shutter.actualTiltPosition);
-      const posEl = html`<div class="esc-shutter-pos-side" style="${this.cfg.panelPosStyle()}">${txt}</div>`;
-      if (posPlace === C.TOP) top.unshift(posEl);
-      else if (posPlace === C.BOTTOM) bottom.push(posEl);
+      const side = (posPlace === C.LEFT || posPlace === C.RIGHT) ? sideStyle(pAlign) : '';
+      const posEl = html`<div class="esc-shutter-pos-side" style="${this.cfg.panelPosStyle()}${side}">${txt}</div>`;
+      if (posPlace === C.TOP || posPlace === C.BOTTOM) {
+        const isTop = posPlace === C.TOP;
+        if (anchored) (isTop ? anchorTop : anchorBottom).push(line(posEl, pAlign));
+        else if (pAlign === C.ALIGN_CENTER) { if (isTop) top.unshift(posEl); else bottom.push(posEl); }
+        else (isTop ? topLines : bottomLines).push(line(posEl, pAlign));
+      }
       else if (posPlace === C.LEFT) midEls.unshift(posEl);
       else midEls.push(posEl);
+    }
+    // v2026.09.24.172: Last Changed readout on a side of the image — identical rules to the readout.
+    const lcPlace = this.cfg.effectiveLcPlacement ? this.cfg.effectiveLcPlacement() : 'default';
+    if ([C.TOP, C.BOTTOM, C.LEFT, C.RIGHT].includes(lcPlace)){
+      const lAlign = this.cfg.lcAlign();
+      const txt = this.cfg.lcText();
+      if (txt) {
+        const side = (lcPlace === C.LEFT || lcPlace === C.RIGHT) ? sideStyle(lAlign) : '';
+        const lcEl = html`<div class="esc-shutter-lc-side" style="${this.cfg.lcStyle()}${side}">${txt}</div>`;
+        if (lcPlace === C.TOP || lcPlace === C.BOTTOM) {
+          const isTop = lcPlace === C.TOP;
+          if (anchored) (isTop ? anchorTop : anchorBottom).push(line(lcEl, lAlign));
+          else if (lAlign === C.ALIGN_CENTER) { if (isTop) top.unshift(lcEl); else bottom.push(lcEl); }
+          else (isTop ? topLines : bottomLines).push(line(lcEl, lAlign));
+        }
+        else if (lcPlace === C.LEFT) midEls.unshift(lcEl);
+        else midEls.push(lcEl);
+      }
+    }
+    // v2026.09.24.152: the NAME uses the same four buckets. Left/right always place here; top/bottom
+    // place here only when anchored to the cover — otherwise they stay in the header rows, which
+    // pick the left/centre/right cell from name_align.
+    const namePlace = String(this.cfg.namePosition() || '').toLowerCase();
+    if (this.cfg.showName()){
+      const nAlign = this.cfg.nameAlign();
+      if (namePlace === C.LEFT || namePlace === C.RIGHT){
+        const nameEl = html`<div class="esc-shutter-name-side" style="${this.cfg.nameSideStyle ? this.cfg.nameSideStyle() : ''}${sideStyle(nAlign)}">${new htmlBlockName(this.shutter).show()}</div>`;
+        if (namePlace === C.LEFT) midEls.unshift(nameEl); else midEls.push(nameEl);
+      } else if (anchored && (namePlace === C.TOP || namePlace === C.BOTTOM)){
+        const nameEl = line(new htmlBlockName(this.shutter).show(), nAlign);
+        // the name is the OUTER item: above the readout at the top, below it at the bottom
+        if (namePlace === C.TOP) anchorTop.unshift(nameEl); else anchorBottom.push(nameEl);
+      }
     }
     // battery / signal icons placed on the LEFT or RIGHT of the image (top/bottom stay in the header rows)
     const addSideIcon = (posEff, el) => { if (posEff === C.LEFT) midEls.unshift(el); else if (posEff === C.RIGHT) midEls.push(el); };
     if (this.cfg.batteryIconActive()) addSideIcon(this.cfg.batteryPositionEff(), new htmlBlockBatteryIcon(this.shutter).show());
     if (this.cfg.signalIconActive()) addSideIcon(this.cfg.signalPositionEff(), new htmlBlockSignalIcon(this.shutter).show());
-    const mid = html`<div class="${C.ESC_CLASS_MIDDLE}">${midEls}</div>`;
+
+    let mid;
+    if (anchored && (anchorTop.length || anchorBottom.length)){
+      // Three-row grid: row 2 is the ordinary cover row; the cover's cell spans rows 1-3 with a
+      // subgrid so its top/bottom items share rows 1/3 WITHOUT changing row 2's height — the buttons
+      // beside the cover stay centred on the cover, not on cover+text. The grid has no row-reverse, so
+      // a reversed row (buttons on the RIGHT) is reproduced by reversing the DOM order instead.
+      const anchorEl = html`
+        <div class="esc-cover-anchor">
+          ${anchorTop.length ? html`<div class="esc-anchor-top">${anchorTop}</div>` : ''}
+          ${windowEl}
+          ${anchorBottom.length ? html`<div class="esc-anchor-bottom">${anchorBottom}</div>` : ''}
+        </div>`;
+      const els = midEls.map(e => (e === windowEl ? anchorEl : e));
+      if (this.cfg.buttonsContainerReversed()) els.reverse();
+      mid = html`<div class="${C.ESC_CLASS_MIDDLE} esc-mid-anchored">${els}</div>`;
+    } else {
+      mid = html`<div class="${C.ESC_CLASS_MIDDLE}">${midEls}</div>`;
+    }
     // No top/bottom zones → emit the plain middle (byte-identical to before)
-    this.setHtmlString((top.length || bottom.length)
+    this.setHtmlString((top.length || bottom.length || topLines.length || bottomLines.length)
       ? html`
         <div class="esc-shutter-middle-stack">
+          ${topLines}
           ${top.length ? html`<div class="esc-shutter-zone-tb">${top}</div>` : ''}
           ${mid}
           ${bottom.length ? html`<div class="esc-shutter-zone-tb">${bottom}</div>` : ''}
+          ${bottomLines}
         </div>`
       : mid);
   }
@@ -546,7 +584,7 @@ export class htmlBlockLeftButtons extends htmlBlock{
 
     return html`
       ${this.cfg.showStandardButtons() &&
-        !this.cfg.buttonOpenCloseHideStates(upDown).includes(this.cfg.positionToState()) &&
+        this.cfg.buttonVisibility(upDown === C.UP ? 'up' : 'down') !== 'hide' &&
          this.cfg.isCoverFeatureActive(feature)
       ? html`
         <ha-icon-button
@@ -555,12 +593,18 @@ export class htmlBlockLeftButtons extends htmlBlock{
           @click=${()=> this.shutter.doOnclick(`${this.cfg.applyInvertForShowButtonUpDownClick(action,true)}`)} >
           <ha-icon
             class="${C.ESC_CLASS_HA_ICON}"
+            style="${this.#visStyle(upDown === C.UP ? 'up' : 'down')}"
             icon="${icon}">
           </ha-icon>
         </ha-icon-button>
       `
       : ''}
     `;
+  }
+  // inline colour when the button is in a configured state and set to recolour rather than hide
+  #visStyle(which){
+    const v = this.cfg.buttonVisibility(which);
+    return (v && v.mode === 'recolor') ? `color:${v.color};` : '';
   }
 }
 export class htmlBlockButtonUp extends htmlBlockLeftButtons{
@@ -580,7 +624,7 @@ export class htmlBlockButtonStop extends htmlBlockLeftButtons{
 
     this.setHtmlString(html`
       ${this.cfg.showStandardButtons() &&
-        !this.cfg.buttonStopHideStates().includes(this.cfg.positionToState()) &&
+        this.cfg.buttonVisibility('stop') !== 'hide' &&
          this.cfg.isCoverFeatureActive(feature)
       ? html`
         <ha-icon-button
@@ -589,6 +633,7 @@ export class htmlBlockButtonStop extends htmlBlockLeftButtons{
           @click=${()=> this.shutter.doOnclick(`${action}`)} >
           <ha-icon
             class="${C.ESC_CLASS_HA_ICON}"
+            style="${(() => { const v = this.cfg.buttonVisibility('stop'); return (v && v.mode === 'recolor') ? `color:${v.color};` : ''; })()}"
             icon="${icon}">
           </ha-icon>
         </ha-icon-button>
@@ -799,15 +844,15 @@ export class htmlBlockCentralWindow extends htmlBlock{
     }
     this.setHtmlString(html`
       ${this.cfg.showWindow()
-      ? (() => { const ov = this.valueOverlay();
+      ? (() => { const ov = this.allOverlays();
           const ep = (this.cfg.effectivePositionPlacement && this.cfg.effectivePositionPlacement()) || '';
           const atSide = ep === 'on-handle' || ep.indexOf('at-handle-') === 0;
           return html`
-        <div class="${C.ESC_CLASS_SELECTOR}" style=${atSide ? 'overflow:visible;' : ''}>
+        <div class="${C.ESC_CLASS_SELECTOR}" ?data-art=${this.#useArt()} style=${atSide ? 'overflow:visible;' : ''}>
           <div class="${C.ESC_CLASS_SELECTOR_PICTURE}">
-            ${this.escImages.getWindowImageSrc(this.cfg.id()) ? html`<img src= "${this.escImages.getWindowImageSrc(this.cfg.id())}">` : ''}
-
-            ${this.showSlide()}
+            ${this.#useArt() ? this.showArt() : html`
+              ${this.escImages.getWindowImageSrc(this.cfg.id()) ? html`<img src= "${this.escImages.getWindowImageSrc(this.cfg.id())}">` : ''}
+              ${this.showSlide()}`}
             ${this.cfg.partialActive()
               ? html`<div class="${C.ESC_CLASS_SELECTOR_PARTIAL}"></div>`
               : ''}
@@ -902,7 +947,7 @@ export class htmlBlockCentralWindow extends htmlBlock{
       tiltHtml = html`<div class="esc-modern-tilt" style="${tiltStyle}"></div>`;
     }
     // Open-% on/at-handle overlay (side placements are drawn outside the window by htmlBlockMiddle)
-    const { onHandle: onHandleVal, atHandle: atHandleVal } = this.valueOverlay();
+    const { onHandle: onHandleVal, atHandle: atHandleVal } = this.allOverlays();
     return html`
       <div class="${C.ESC_CLASS_SELECTOR} esc-modern">
         <div class="esc-modern-bar" style="${barStyle}">
@@ -920,24 +965,39 @@ export class htmlBlockCentralWindow extends htmlBlock{
   }
   // Open-% readout that tracks the shade edge — on the handle, or beside it (left/right/above/below).
   // Used by both the Modern bar and the Classic window. Returns {onHandle, atHandle} template pieces.
-  valueOverlay(){
-    const placement = this.cfg.effectivePositionPlacement ? this.cfg.effectivePositionPlacement() : 'default';
+  // Position Readout + Last Changed overlays together, for the two call sites that draw them.
+  allOverlays(){
+    const a = this.valueOverlay();
+    const lcP = this.cfg.effectiveLcPlacement ? this.cfg.effectiveLcPlacement() : 'default';
+    if (lcP === 'default') return a;
+    const b = this.valueOverlay({ placement: lcP, txt: this.cfg.lcText(), style: this.cfg.lcStyle(), noEnd: true });
+    return { onHandle: html`${a.onHandle}${b.onHandle}`, atHandle: html`${a.atHandle}${b.atHandle}` };
+  }
+  // v2026.09.24.172: parameterised so the Last Changed readout reuses the SAME placement engine.
+  //   spec = { placement, txt, style, noEnd }  — omit for the Position Readout (unchanged behaviour)
+  valueOverlay(spec){
+    spec = spec || {};
+    const placement = spec.placement != null ? spec.placement
+      : (this.cfg.effectivePositionPlacement ? this.cfg.effectivePositionPlacement() : 'default');
     if (placement !== 'on-handle' && placement.indexOf('at-handle-') !== 0) return { onHandle: html``, atHandle: html`` };
     const isH = !(this.cfg.verticalMovement && this.cfg.verticalMovement());
     let pct = Number(this.shutter.actualShutterPosition);
     if (!Number.isFinite(pct)) pct = 0;
     pct = Math.max(0, Math.min(100, pct));
-    const txt = this.cfg.computePositionText(this.shutter.actualShutterPosition, this.shutter.actualTiltPosition);
+    const txt = spec.txt != null ? spec.txt
+      : this.cfg.computePositionText(this.shutter.actualShutterPosition, this.shutter.actualTiltPosition);
+    if (!txt) return { onHandle: html``, atHandle: html`` };
     const base = 'position:absolute;white-space:nowrap;font-size:calc(11px*var(--esc-button-scale,1));pointer-events:none;z-index:3;';
     // clamp so a readout sitting on the handle stays fully inside the bar (~10px half-height)
     const clamped = `clamp(10px, ${pct}%, calc(100% - 10px))`;
     const along = isH ? `left:${clamped};` : `bottom:${clamped};`;
     // panel Position Value text style (size/weight/colour) — appended so it wins over the fallbacks
-    const pstyle = this.cfg.panelPosStyle ? this.cfg.panelPosStyle() : '';
+    const pstyle = spec.style != null ? spec.style : (this.cfg.panelPosStyle ? this.cfg.panelPosStyle() : '');
     if (placement === 'on-handle'){
       const onStyle = `color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.7);font-weight:600;${pstyle}`;
       // Open/Closed end-state text can leave the handle → center / above / below the bar (% stays on handle)
-      const isEnd = txt.indexOf('%') === -1;
+      // (last-changed text never contains '%', so it must opt out or it would be treated as end-state)
+      const isEnd = !spec.noEnd && txt.indexOf('%') === -1;
       const endPlace = this.cfg.panelPosEnd ? this.cfg.panelPosEnd() : 'handle';
       if (isEnd && endPlace !== 'handle'){
         if (endPlace === 'center'){
@@ -973,6 +1033,37 @@ export class htmlBlockCentralWindow extends htmlBlock{
       xy.fill(x,y);
     }
     this.setXySize(xy);
+  }
+  // v2026.09.24.179: the classic cover is drawn by the SAME function as the editor preview
+  // (coverArt.js). Venetian tilt still uses its own slat renderer, since it animates each slat.
+  #useArt(){
+    return !(this.cfg.canTilt() && this.shutter && typeof this.shutter.canShowTilt === 'function' && this.shutter.canShowTilt());
+  }
+  showArt(){
+    const id = this.cfg.id();
+    const img = this.escImages;
+    // covered length = where the leading edge is on screen, as a share of the window. Both come from
+    // the same measurement, so zoom and scaling cancel out, and a drag shows live.
+    const sh = this.shutter || {};
+    const vert = this.cfg.verticalMovement ? this.cfg.verticalMovement() : true;
+    const full = Number(typeof sh.windowSizeMovingDirectionPx === 'function' ? sh.windowSizeMovingDirectionPx()
+      : (vert ? this.cfg.windowHeightPx() : this.cfg.windowWidthPx())) || 0;
+    const pos = Number(sh.actualScreenPosition);
+    const pct = (full > 0 && Number.isFinite(pos)) ? Math.max(0, Math.min(100, pos / full * 100)) : 0;
+    let bottomPx = 0;
+    try { bottomPx = Number(img.getShutterBottomImageSize(id)?.y?.()) || 0; } catch (e) {}
+    return classicArt({
+      W: this.cfg.windowWidthPx(), H: this.cfg.windowHeightPx(),
+      dir: this.cfg.unrollUnfoldDirection(),
+      rotate: !!this.cfg.rotateSlatsImage(),
+      len: pct + '%',
+      view: img.getViewImageSrc(id) || '',
+      slat: img.getShutterSlatImageSrc(id) || '',
+      bottom: img.getShutterBottomImageSrc(id) || '',
+      frame: img.getWindowImageSrc(id) || '',
+      stretchBottom: !!this.cfg.stretchEdgeImage(),
+      bottomPx,
+    });
   }
   showSlide(){
      return html`
@@ -1033,13 +1124,30 @@ export class htmlBlockRightButtons extends htmlBlock{
       const styleRef = this.cfg.pctButtonStyle && this.cfg.pctButtonStyle();
       const appr = styleRef ? resolveButtonAppearance(styleRef, false) : null;
       const libStyle = appr ? areaButtonStyle(appr, false, 'var(--primary-color, #2196F3)') : '';
+      // v2026.09.24.143: the individual Preset Button settings reach the CSS as --esc-pct-btn-*
+      // VARIABLES, which a library Button Style silently beat because that is applied INLINE and
+      // inline always wins. So picking a Button Style wiped every colour/size you had set. The
+      // explicitly-set values are the more specific intent, so re-apply them ON TOP of the library
+      // look; anything left unset still falls through to the library, then to the theme.
+      let ovr = '';
+      const _bg = this.cfg.pctButtonBg && this.cfg.pctButtonBg();
+      if (_bg) ovr += `background:${_bg};`;
+      const _bd = this.cfg.pctButtonBorder && this.cfg.pctButtonBorder();
+      if (_bd) ovr += `border-color:${_bd};`;      // keep the library's width/style, change the colour
+      const _col = this.cfg.pctButtonColor && this.cfg.pctButtonColor();
+      if (_col) ovr += `color:${_col};`;
+      const _wt = this.cfg.pctButtonWeight && this.cfg.pctButtonWeight();
+      if (_wt) ovr += `font-weight:${_wt};`;
+      const _sz = Number(this.cfg.pctButtonSize && this.cfg.pctButtonSize());
+      if (_sz > 0) ovr += `font-size:${_sz}px;`;
+      const pctStyle = (libStyle || '') + ovr;
       this.setHtmlString(html`
         <div class="${C.ESC_CLASS_BUTTONS} esc-shutter-pct-values" style="${this.cfg.buttonFlexFlow(this.cfg.presetsOrientation())}">
           ${presets.map(p => {
             const pct = Number(p);
             return html`
               <button class="esc-shutter-pct-btn"
-                style=${libStyle || ''}
+                style=${pctStyle || ''}
                 ?disabled=${this.cfg.disabledGlobaly()}
                 @click=${() => this.shutter.doOnclick(`${C.ACTION_SHUTTER_SET_POS}`, this.cfg.calcOffset(pct))}>
                 ${pct}%
@@ -1094,26 +1202,52 @@ export class htmlBlockRightButtons extends htmlBlock{
       [0, 1, 2, 3, 4, 5].map(j => [j, () => this.shutter.doOnclick(`${C.ACTION_SHUTTER_SET_POS}`, this.cfg.calcOffset(pct[j]))])
     );
 
+    // v2026.09.24.146: previously this emitted a fixed 2x3 grid of ALL six icons, whatever the style's
+    // Preset Percentages said — so 'Icons' ignored the value list that 'Values' honoured. Now one
+    // button per configured percentage: the icon is picked as the nearest visual match from the set,
+    // while the CLICK and the label use the percentage the user actually asked for (the icons only
+    // come in six fixed closure steps, so they can only ever approximate an arbitrary value).
+    const wanted = this.#pctIconButtons();
     this.setHtmlString(html`
-        ${[0, 1].map(i => html`
-          <div class="${C.ESC_CLASS_BUTTONS} esc-shutter-pct-icons" style="${this.cfg.buttonFlexFlow(this.cfg.presetsOrientation())}">
-            ${[i * 3, i * 3 + 1, i * 3 + 2].map(j => html`
-              <ha-icon-button
-                label=${labels[j]}
-                .disabled=${disabled[pointer[j]]}
-                @click=${click[j]}
-                path=${icons[j]}>
-              </ha-icon-button>
-            `)}
-          </div>
-        `)}
+        <div class="${C.ESC_CLASS_BUTTONS} esc-shutter-pct-icons" style="${this.cfg.buttonFlexFlow(this.cfg.presetsOrientation())}">
+          ${wanted.map(b => html`
+            <ha-icon-button
+              label=${b.label}
+              .disabled=${disabled[pointer[b.idx]]}
+              @click=${() => this.shutter.doOnclick(`${C.ACTION_SHUTTER_SET_POS}`, this.cfg.calcOffset(b.pct))}
+              path=${icons[b.idx]}>
+            </ha-icon-button>
+          `)}
+        </div>
     `);
   }
+  // One entry per configured percentage: { pct, idx (nearest icon), label }.
+  #pctIconButtons(){
+    const nominal = [C.SHUTTER_OPEN_PCT, 75, 50, 25, 10, C.SHUTTER_CLOSED_PCT];
+    const cfgList = this.cfg.positionPresets ? this.cfg.positionPresets() : [];
+    const list = (Array.isArray(cfgList) && cfgList.length) ? cfgList : C.ESC_PARTIAL_PRESETS_DEFAULT;
+    return list
+      // a chips input yields strings, and Number('') / Number(null) are both 0 — which would turn a
+      // blank entry into a spurious "fully closed" button. Reject blanks explicitly, then clamp.
+      .filter(v => v !== null && v !== undefined && String(v).trim() !== '')
+      .map(v => Number(v))
+      .filter(v => Number.isFinite(v))
+      .map(v => Math.max(C.SHUTTER_CLOSED_PCT, Math.min(C.SHUTTER_OPEN_PCT, v)))
+      .map((pct) => {
+        let idx = 0;
+        nominal.forEach((nv, i) => { if (Math.abs(nv - pct) < Math.abs(nominal[idx] - pct)) idx = i; });
+        const open = pct >= C.SHUTTER_OPEN_PCT, shut = pct <= C.SHUTTER_CLOSED_PCT;
+        const label = open ? `Fully ${this.cfg.applyInvertOpenCloseUi(C.SHUTTER_STATE_OPEN)}`
+          : shut ? `Fully ${this.cfg.applyInvertOpenCloseUi(C.SHUTTER_STATE_CLOSED)}`
+            : `Partially ${this.cfg.applyInvertOpenCloseUi(C.SHUTTER_STATE_CLOSED)} ( ${this.cfg.invertPosition(pct)}% )`;
+        return { pct, idx, label };
+      });
+  }
   defineSize(){
-
     const haButtonSize = this.cfg.iconButtonSize();
-
-    let xy = new xyPair(haButtonSize*2,haButtonSize*3);
+    // size follows the actual button count, not the retired fixed 2x3 grid
+    const n = Math.max(1, this.#pctIconButtons().length);
+    let xy = new xyPair(haButtonSize, haButtonSize * n);
     if (!this.cfg.buttonGroupInRow()){
       xy.switch();
     }
