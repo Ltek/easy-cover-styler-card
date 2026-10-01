@@ -234,9 +234,10 @@ cover_styles_entities:
 
 Hidden covers are skipped by default (`auto_filter.exclude_hidden`), and a cover listed explicitly
 under `entities:` is always shown regardless.
+
+
 ---
 
 ## Screenshots
-
 <!-- SCREENSHOTS:START -->
 <!-- SCREENSHOTS:END -->
