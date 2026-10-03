@@ -80,6 +80,32 @@ Put images in your Home Assistant **media** folder under `images/slats`, `images
 ## Screenshots
 
 <!-- SCREENSHOTS:START -->
+<table>
+  <tr>
+    <td align="center" valign="top">
+      <img src="screenshots/example15-42.JPG" width="100%" alt="example15 42">
+    </td>
+    <td align="center" valign="top">
+      <img src="screenshots/example16-32.JPG" width="100%" alt="example16 32">
+    </td>
+    <td align="center" valign="top">
+      <img src="screenshots/example36-56.JPG" width="100%" alt="example36 56">
+    </td>
+    <td align="center" valign="top">
+      <img src="screenshots/example37-25.JPG" width="100%" alt="example37 25">
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="top">
+      <img src="screenshots/example38-43.JPG" width="100%" alt="example38 43">
+    </td>
+    <td align="center" valign="top">
+      <img src="screenshots/example39-39.JPG" width="100%" alt="example39 39">
+    </td>
+    <td></td>
+    <td></td>
+  </tr>
+</table>
 <!-- SCREENSHOTS:END -->
 
 ---
