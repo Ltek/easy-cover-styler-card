@@ -4,7 +4,7 @@ A Home Assistant Dashboard card for **shutters, blinds, curtains, shades and awn
 drawn as an animated window you can tap or drag, or as a coloured slider. Different kinds of cover can
 sit side by side on one card, and everything is set up in a visual editor.
 
-Current build: **v2026.10.16.194** · full history in [CHANGELOG.md](CHANGELOG.md)
+Current build: **v2026.10.16.195** · full history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
@@ -44,6 +44,9 @@ A **Cover Style** is a saved look for one cover: its pictures or colours, which 
 buttons, and what text it shows. Give each Area, Label or cover its own style, so roller shutters,
 shades and curtains can share one card. Four built-ins are included — **Color Slider**,
 **Roller Shutter**, **Curtain** and **Shade** — and you can duplicate one to make your own.
+
+**Quick Start Presets** sit right under the style's preview: one click sets the images, colours and
+options for a **Pull Shade**, **Roller Shutter**, **Curtain** or **Shade** look, and you adjust from there.
 
 - **Image Slider** — an animated window built from a frame, an outside view, the cover fabric and a
   bottom bar. Many images are included, and any of them can be swapped for a plain colour.

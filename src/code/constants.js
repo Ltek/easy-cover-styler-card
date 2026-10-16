@@ -197,7 +197,7 @@ export const HA_CARD_NAME = "easy-cover-styler-card";
 export const HA_SHUTTER_NAME = `easy-cover-styler`;
 export const HA_EDITOR_NAME = "easy-cover-styler-card-editor";
 export const CARD_DISPLAY_NAME = "Easy Cover Styler Card";
-export const CARD_VERSION = '2026.10.16.194';   // single source of truth (editor header + console banner)
+export const CARD_VERSION = '2026.10.16.195';   // single source of truth (editor header + console banner)
 export const HA_HUI_VIEW = 'hui-view';
 export const SPACE = ' ';
 

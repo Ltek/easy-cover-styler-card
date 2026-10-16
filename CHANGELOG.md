@@ -5,6 +5,16 @@ resets. Newest first.
 
 ---
 
+## v2026.10.16.195
+
+- **Quick Start Presets are easier to find.** They moved out of the Image Slider group to an
+  always-visible row right under the Cover Style preview, above the collapsible groups — they set
+  values across groups (Visual Type, Closing Direction, images), and before, anyone on a Color Slider
+  style never saw them. The hint is shown as text instead of a tooltip, and the preset you click is
+  highlighted briefly with "Applied … — adjust anything below."
+
+---
+
 ## v2026.10.16.194
 
 - **Quick presets for more cover types.** The Image Slider group now offers one-click **Pull Shade**,

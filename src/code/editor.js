@@ -2275,11 +2275,29 @@ export class EnhancedShutterCardEditor extends LitElement {
         groups: { ...base('shade'), ...noPull } },
     ];
   }
-  _applyCoverPreset(groups) {
+  _applyCoverPreset(groups, label) {
     const g = { ...((this._csDraft && this._csDraft.groups) || {}), ...groups };
     this._csDraft = { ...this._csDraft, groups: g };
     this._imgSel = {};   // clear forced picker modes so the selects reflect the new values
+    this._presetApplied = label || '';
+    clearTimeout(this._presetTimer);
+    this._presetTimer = setTimeout(() => { this._presetApplied = ''; this.requestUpdate(); }, 2500);
     this.requestUpdate();
+  }
+  // Quick Start Presets: always visible under the preview (not inside a group), because a preset sets
+  // values across groups (Visual Type, Closing Direction, images…) and is where a new style starts.
+  _renderQuickStart() {
+    const done = this._presetApplied;
+    return html`
+      <div class="quick-start">
+        <div class="row"><label class="row-label">Quick Start Presets</label>
+          <div class="color-ctrl" style="flex-wrap:wrap;gap:4px;">
+            ${this._coverPresets().map(p => html`<button class="add-btn ${done === p.label ? 'applied' : ''}" title=${p.hint || ''}
+              @click=${() => this._applyCoverPreset(p.groups, p.label)}>${p.label}</button>`)}
+          </div></div>
+        <div class="hint">${done ? html`Applied <b>${done}</b> — adjust anything below.`
+          : 'One click sets the images, colours and options for that look. Adjust anything below.'}</div>
+      </div>`;
   }
   // Live preview of the Cover Style draft at three positions. Classic styles stack the real image
   // slots (view behind, slat covering the open fraction, bottom bar at the edge); modern styles draw
@@ -2558,6 +2576,7 @@ export class EnhancedShutterCardEditor extends LitElement {
       <div class="row"><label class="row-label">Name</label>
         <input type="text" .value=${d.name || ''} @input=${(e) => { this._csDraft = { ...d, name: e.target.value }; }}></div>
       ${this._renderCoverStylePreview()}
+      ${this._renderQuickStart()}
       ${this._csGroup('visual', 'Visual', () => html`
         ${this._rowSelect(this._csField(C.CONFIG_COVER_VISUAL, { label: 'Visual Type', type: 'select',
           options: [['image', 'Image Slider'], ['modern', 'Color Slider']] }))}
@@ -2591,10 +2610,6 @@ export class EnhancedShutterCardEditor extends LitElement {
         : this._csGroup('images', 'Image Slider', () => html`
         ${this._rowSlider(this._csField(C.CONFIG_BASE_WIDTH_PX, { label: 'Base Width', type: 'slider', min: 20, max: 400, step: 5, unit: 'px' }))}
         ${this._rowSlider(this._csField(C.CONFIG_BASE_HEIGHT_PX, { label: 'Base Height', type: 'slider', min: 20, max: 400, step: 5, unit: 'px' }))}
-        <div class="row"><label class="row-label" title="One-click starting points — each sets the images, colours and options for that look. Tweak anything afterwards.">Quick presets</label>
-          <div class="color-ctrl" style="flex-wrap:wrap;gap:4px;">
-            ${this._coverPresets().map(p => html`<button class="add-btn" title=${p.hint || ''} @click=${() => this._applyCoverPreset(p.groups)}>${p.label}</button>`)}
-          </div></div>
         ${this._rowImageSelect(this._csField(C.CONFIG_WINDOW_IMAGE, { label: 'Window Image', type: 'imageSelect', options: C.BUNDLED_WINDOW_IMAGES, allowColour: false, allowNone: true }))}
         ${this._rowSlider(this._csField(C.CONFIG_FRAME_BORDER_WIDTH, { label: 'Frame Border Width', type: 'slider', min: 0, max: 12, step: 1, unit: 'px', zeroLabel: 'None', hint: 'Build your own frame as a border, instead of a Window Image.' }))}
         ${this._rowColor(this._csField(C.CONFIG_FRAME_BORDER_COLOR, { label: 'Frame Border Colour', type: 'color', defaultLabel: 'None', seedHex: '#d8dde0' }))}
@@ -3021,6 +3036,8 @@ EnhancedShutterCardEditor.CSS = `
     color: var(--ltek-c-accent);
     padding: 4px 12px;
   }
+  .add-btn.applied { border-style: solid; background: var(--ltek-c-accent-fade, rgba(3, 169, 244, 0.15)); }
+  .quick-start { margin: var(--ltek-sp-2) 0 var(--ltek-sp-3); }
   .multi { display: flex; flex-wrap: wrap; gap: var(--ltek-sp-2); }
   .multi-opt {
     border: 1px solid var(--ltek-c-border);
