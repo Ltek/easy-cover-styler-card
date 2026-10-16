@@ -35,6 +35,8 @@ export const isImageFile = (v) => typeof v === 'string' && v.trim() !== '' && (
  *                 area (drawn outside the clipped cover box), the way a pull-shade cord/handle does.
  *   frameBorder   { width, color, radius } — a per-cover CSS frame drawn as a border on the cover,
  *                 an alternative (or addition) to a frame IMAGE.
+ *   frameGap      px inset between the frame border and the shade, so the shade reads as a separate
+ *                 panel inside the frame rather than one block of colour. The gap shows the card behind.
  */
 export function classicArt(o) {
   const W = Number(o.W) || 0, H = Number(o.H) || 0;
@@ -147,8 +149,12 @@ export function classicArt(o) {
   if (fbW > 0 && fb.color) border += `border:${fbW}px solid ${fb.color};`;
   if (fbR > 0) border += `border-radius:${fbR}px;`;
 
+  // Optional gap: inset everything inside the border so the shade floats as a separate panel. The
+  // slat box, hanging pull and frame image all live in this inner layer, so they inset together.
+  const gap = Number(o.frameGap) > 0 ? Number(o.frameGap) : 0;
+  const inner = `position:absolute;inset:${gap}px;overflow:hidden;${gap && fbR ? `border-radius:${fbR}px;` : ''}`;
   return html`<div class="esc-art" style="position:absolute;inset:0;overflow:hidden;${border}">
-    ${view}<div class="esc-art-cover" style="${box}">${fabric}${bottom}</div>${hangPull}${frame}
+    <div style="${inner}">${view}<div class="esc-art-cover" style="${box}">${fabric}${bottom}</div>${hangPull}${frame}</div>
   </div>`;
 }
 

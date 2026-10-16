@@ -5,6 +5,16 @@ resets. Newest first.
 
 ---
 
+## v2026.10.16.194
+
+- **Quick presets for more cover types.** The Image Slider group now offers one-click **Pull Shade**,
+  **Roller Shutter**, **Curtain** and **Shade** presets; each sets the images, colours and options for
+  that look (reusing the built-in Cover Style definitions), ready to tweak.
+- **Gap between frame and shade.** New **Gap Between Frame & Shade** slider insets the shade inside the
+  frame, so it reads as a separate panel rather than one block of colour. The gap shows the card behind.
+- The **Pull Shade** preset now also clears the Favorite-position marker (the thin grey line across the
+  cover) and adds a small frame gap, so it matches the intended pull-shade look out of the box.
+
 ## v2026.10.16.193
 
 - **Pull now hangs below the slat.** New **Pull Hangs Below Slat** option (Image Options): the pull

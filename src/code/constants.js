@@ -180,6 +180,7 @@ export const CONFIG_PULL_BELOW_SLAT = 'pull_below_slat';
 export const CONFIG_FRAME_BORDER_WIDTH = 'frame_border_width';
 export const CONFIG_FRAME_BORDER_COLOR = 'frame_border_color';
 export const CONFIG_FRAME_BORDER_RADIUS = 'frame_border_radius';
+export const CONFIG_FRAME_GAP = 'frame_gap_px';   // inset between the frame border and the shade
 export const CONFIG_BASE_HEIGHT_PX = 'base_height_px';
 export const CONFIG_BASE_WIDTH_PX = 'base_width_px';
 export const CONFIG_RESIZE_HEIGHT_PCT = 'resize_height_pct';
@@ -196,7 +197,7 @@ export const HA_CARD_NAME = "easy-cover-styler-card";
 export const HA_SHUTTER_NAME = `easy-cover-styler`;
 export const HA_EDITOR_NAME = "easy-cover-styler-card-editor";
 export const CARD_DISPLAY_NAME = "Easy Cover Styler Card";
-export const CARD_VERSION = '2026.10.16.193';   // single source of truth (editor header + console banner)
+export const CARD_VERSION = '2026.10.16.194';   // single source of truth (editor header + console banner)
 export const HA_HUI_VIEW = 'hui-view';
 export const SPACE = ' ';
 
@@ -1150,6 +1151,7 @@ export const CONFIG_DEFAULT ={
   [CONFIG_FRAME_BORDER_WIDTH]: 0,
   [CONFIG_FRAME_BORDER_COLOR]: '',
   [CONFIG_FRAME_BORDER_RADIUS]: 0,
+  [CONFIG_FRAME_GAP]: 0,
   [CONFIG_BASE_HEIGHT_PX]: ESC_BASE_HEIGHT_PX,
   [CONFIG_BASE_WIDTH_PX]: ESC_BASE_WIDTH_PX,
   [CONFIG_RESIZE_HEIGHT_PCT]: ESC_RESIZE_HEIGHT_PCT,

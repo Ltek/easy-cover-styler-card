@@ -4,7 +4,7 @@ A Home Assistant Dashboard card for **shutters, blinds, curtains, shades and awn
 drawn as an animated window you can tap or drag, or as a coloured slider. Different kinds of cover can
 sit side by side on one card, and everything is set up in a visual editor.
 
-Current build: **v2026.10.16.193** · full history in [CHANGELOG.md](CHANGELOG.md)
+Current build: **v2026.10.16.194** · full history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 

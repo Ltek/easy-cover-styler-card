@@ -1067,6 +1067,7 @@ export class htmlBlockCentralWindow extends htmlBlock{
       pullBelow: !!this.cfg.pullBelowSlat(),
       frameBorder: { width: this.cfg.frameBorderWidth(), color: this.cfg.frameBorderColor(),
         radius: this.cfg.frameBorderRadius() },
+      frameGap: this.cfg.frameGapPx(),
     });
   }
   showSlide(){

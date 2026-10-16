@@ -2236,21 +2236,47 @@ export class EnhancedShutterCardEditor extends LitElement {
       },
     };
   }
-  // One-click "Pull Shade" look: solid slat, a pull cord that matches the slat and hangs below it,
-  // a thin border frame, and no window picture. Writes the draft; the user can tweak any part after.
-  _applyPullShadePreset() {
-    const g = { ...((this._csDraft && this._csDraft.groups) || {}) };
-    g[C.CONFIG_COVER_VISUAL] = 'image';
-    g[C.CONFIG_WINDOW_IMAGE] = 'none';                 // no window frame picture
-    g[C.CONFIG_SHUTTER_BOTTOM_IMAGE] = 'bottoms/pull-cord.svg';
-    g[C.CONFIG_SHUTTER_BOTTOM_MATCH_SLAT] = true;      // pull takes the slat colour
-    g[C.CONFIG_PULL_BELOW_SLAT] = true;                // and hangs below the slat
-    g[C.CONFIG_STRETCH_EDGE_SHUTTER_IMAGE] = false;    // keep the pull's shape, don't stretch it
-    const slat = g[C.CONFIG_SHUTTER_SLAT_IMAGE];
-    if (!slat || /\.(png|jpe?g|gif|webp|svg)$/i.test(String(slat))) g[C.CONFIG_SHUTTER_SLAT_IMAGE] = '#ffffff';
-    g[C.CONFIG_FRAME_BORDER_WIDTH] = 2;
-    g[C.CONFIG_FRAME_BORDER_COLOR] = '#d8dde0';
-    g[C.CONFIG_FRAME_BORDER_RADIUS] = 4;
+  // One-click starting points applied to the current Cover Style draft. Each is a sparse group object;
+  // the user tweaks any part after. The image looks reuse the built-in Cover Style groups so they stay
+  // in sync, plus explicit resets of the pull-shade keys (noPull) so switching between presets is clean.
+  _coverPresets() {
+    const b = builtinCoverStyles();
+    const base = (type) => ({ ...((b[builtinCoverStyleSlug(type)] || {}).groups || {}) });
+    const noPull = {
+      [C.CONFIG_SHUTTER_BOTTOM_MATCH_SLAT]: false,
+      [C.CONFIG_PULL_BELOW_SLAT]: false,
+      [C.CONFIG_FRAME_BORDER_WIDTH]: 0,
+      [C.CONFIG_FRAME_GAP]: 0,
+      [C.CONFIG_PARTIAL_CLOSE_PCT]: 0,
+    };
+    return [
+      { label: 'Pull Shade',
+        hint: 'Solid slat, a pull cord that matches the slat and hangs below it, a thin border frame with a gap, and no window picture.',
+        groups: {
+          [C.CONFIG_COVER_VISUAL]: 'image',
+          [C.CONFIG_WINDOW_IMAGE]: 'none',
+          [C.CONFIG_SHUTTER_SLAT_IMAGE]: '#ffffff',
+          [C.CONFIG_SHUTTER_BOTTOM_IMAGE]: 'bottoms/pull-cord.svg',
+          [C.CONFIG_SHUTTER_BOTTOM_MATCH_SLAT]: true,
+          [C.CONFIG_PULL_BELOW_SLAT]: true,
+          [C.CONFIG_STRETCH_EDGE_SHUTTER_IMAGE]: false,
+          [C.CONFIG_CLOSING_DIRECTION]: C.DOWN,
+          [C.CONFIG_PARTIAL_CLOSE_PCT]: 0,            // no Favorite-position line
+          [C.CONFIG_FRAME_BORDER_WIDTH]: 2,
+          [C.CONFIG_FRAME_BORDER_COLOR]: '#d8dde0',
+          [C.CONFIG_FRAME_BORDER_RADIUS]: 6,
+          [C.CONFIG_FRAME_GAP]: 6,
+        } },
+      { label: 'Roller Shutter', hint: 'Frame, outdoor view, slats and a bottom bar.',
+        groups: { ...base('roller-shutter'), ...noPull } },
+      { label: 'Curtain', hint: 'Sideways-closing curtain fabric with a side-placed name.',
+        groups: { ...base('curtain'), ...noPull } },
+      { label: 'Shade', hint: 'Minimal coloured shade over an outdoor view.',
+        groups: { ...base('shade'), ...noPull } },
+    ];
+  }
+  _applyCoverPreset(groups) {
+    const g = { ...((this._csDraft && this._csDraft.groups) || {}), ...groups };
     this._csDraft = { ...this._csDraft, groups: g };
     this._imgSel = {};   // clear forced picker modes so the selects reflect the new values
     this.requestUpdate();
@@ -2308,6 +2334,7 @@ export class EnhancedShutterCardEditor extends LitElement {
           pullBelow: !!val(C.CONFIG_PULL_BELOW_SLAT),
           frameBorder: { width: val(C.CONFIG_FRAME_BORDER_WIDTH), color: val(C.CONFIG_FRAME_BORDER_COLOR),
             radius: val(C.CONFIG_FRAME_BORDER_RADIUS) },
+          frameGap: val(C.CONFIG_FRAME_GAP),
         })}
       </div>`;
 
@@ -2564,12 +2591,15 @@ export class EnhancedShutterCardEditor extends LitElement {
         : this._csGroup('images', 'Image Slider', () => html`
         ${this._rowSlider(this._csField(C.CONFIG_BASE_WIDTH_PX, { label: 'Base Width', type: 'slider', min: 20, max: 400, step: 5, unit: 'px' }))}
         ${this._rowSlider(this._csField(C.CONFIG_BASE_HEIGHT_PX, { label: 'Base Height', type: 'slider', min: 20, max: 400, step: 5, unit: 'px' }))}
-        <div class="row"><label class="row-label" title="Set up a plain pull-shade: solid slat, a pull cord that matches the slat and hangs below it, a thin border frame, and no window picture.">Quick preset</label>
-          <button class="add-btn" @click=${() => this._applyPullShadePreset()}>Pull-Shade style</button></div>
+        <div class="row"><label class="row-label" title="One-click starting points — each sets the images, colours and options for that look. Tweak anything afterwards.">Quick presets</label>
+          <div class="color-ctrl" style="flex-wrap:wrap;gap:4px;">
+            ${this._coverPresets().map(p => html`<button class="add-btn" title=${p.hint || ''} @click=${() => this._applyCoverPreset(p.groups)}>${p.label}</button>`)}
+          </div></div>
         ${this._rowImageSelect(this._csField(C.CONFIG_WINDOW_IMAGE, { label: 'Window Image', type: 'imageSelect', options: C.BUNDLED_WINDOW_IMAGES, allowColour: false, allowNone: true }))}
         ${this._rowSlider(this._csField(C.CONFIG_FRAME_BORDER_WIDTH, { label: 'Frame Border Width', type: 'slider', min: 0, max: 12, step: 1, unit: 'px', zeroLabel: 'None', hint: 'Build your own frame as a border, instead of a Window Image.' }))}
         ${this._rowColor(this._csField(C.CONFIG_FRAME_BORDER_COLOR, { label: 'Frame Border Colour', type: 'color', defaultLabel: 'None', seedHex: '#d8dde0' }))}
         ${this._rowSlider(this._csField(C.CONFIG_FRAME_BORDER_RADIUS, { label: 'Frame Corner Radius', type: 'slider', min: 0, max: 40, step: 1, unit: 'px', zeroLabel: 'Square' }))}
+        ${this._rowSlider(this._csField(C.CONFIG_FRAME_GAP, { label: 'Gap Between Frame & Shade', type: 'slider', min: 0, max: 30, step: 1, unit: 'px', zeroLabel: 'None', hint: 'Insets the shade inside the frame so it reads as a separate panel, not one block of colour.' }))}
         ${this._rowImageSelect(this._csField(C.CONFIG_VIEW_IMAGE, { label: 'View Image / Colour', type: 'imageSelect', options: C.BUNDLED_VIEW_IMAGES, seedHex: '#20303a' }))}
         ${this._rowImageSelect(this._csField(C.CONFIG_SHUTTER_SLAT_IMAGE, { label: 'Slat Image / Colour', type: 'imageSelect', options: C.BUNDLED_SLAT_IMAGES, seedHex: '#888888' }))}
         ${this._rowImageSelect(this._csField(C.CONFIG_SHUTTER_BOTTOM_IMAGE, { label: 'Bottom-Bar / Pull Image', type: 'imageSelect', options: C.BUNDLED_BOTTOM_IMAGES, allowColour: false }))}

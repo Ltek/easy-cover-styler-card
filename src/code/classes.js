@@ -2498,6 +2498,7 @@ export class shutterCfg {
     this.frameBorderWidth(escConfig[C.CONFIG_FRAME_BORDER_WIDTH]);
     this.frameBorderColor(escConfig[C.CONFIG_FRAME_BORDER_COLOR]);
     this.frameBorderRadius(escConfig[C.CONFIG_FRAME_BORDER_RADIUS]);
+    this.frameGapPx(escConfig[C.CONFIG_FRAME_GAP]);
 
     this.scaleButtons(escConfig[C.CONFIG_SCALE_BUTTONS]);
     this.scaleIcons(escConfig[C.CONFIG_SCALE_ICONS]);
@@ -3139,6 +3140,9 @@ export class shutterCfg {
   }
   frameBorderRadius(value = null){
     return this.#getCfg(C.CONFIG_FRAME_BORDER_RADIUS,value);
+  }
+  frameGapPx(value = null){
+    return this.#getCfg(C.CONFIG_FRAME_GAP,value);
   }
   scaleButtons(value = null){
     return this.#getCfg(C.CONFIG_SCALE_BUTTONS,value);
