@@ -28,6 +28,11 @@ export const isImageFile = (v) => typeof v === 'string' && v.trim() !== '' && (
  *   view, slat, bottom, frame   resolved image URL, or a CSS colour, or '' for none
  *   stretchBottom stretch the bottom bar across the full width
  *   bottomPx      the bottom bar's thickness in px when known (else it scales with its width)
+ *   matchBottomToSlat  when the slat is a solid colour, paint the bottom bar/pull in that same
+ *                      colour (a shape image is tinted via a CSS mask), so the pull reads as one
+ *                      piece with the shade. No effect when the slat is an image.
+ *   frameBorder   { width, color, radius } — a per-cover CSS frame drawn as a border on the cover,
+ *                 an alternative (or addition) to a frame IMAGE.
  */
 export function classicArt(o) {
   const W = Number(o.W) || 0, H = Number(o.H) || 0;
@@ -72,17 +77,30 @@ export function classicArt(o) {
   // travel. Stretch fills the width with one copy; otherwise the image repeats at its own aspect.
   // With no known thickness a stretched bar keeps the image's aspect (an <img> at full width) and
   // a repeating bar uses 8px, which is what the bundled bars are drawn at to within a pixel.
+  // "Match slat colour": when the slat is a solid colour (not an image), the pull takes that colour.
+  // A shape image is punched out with a CSS mask so only its silhouette is painted; a plain colour /
+  // empty bottom just becomes a solid bar of the slat colour. The untinted paths are left untouched.
+  const slatIsColour = o.slat && !isImageFile(o.slat);
+  const tint = (o.matchBottomToSlat && slatIsColour) ? o.slat : '';
   let bottom = '';
-  if (o.bottom) {
+  if (o.bottom || tint) {
     const file = isImageFile(o.bottom);
     const px = Number(o.bottomPx) > 0 ? Number(o.bottomPx) : 0;
     const t = px || 8;
-    const bar = (w) => html`<div style="width:${w};height:${t}px;${file
-      ? `background-image:url("${o.bottom}");background-repeat:repeat-x;background-size:${o.stretchBottom ? '100% 100%' : 'auto 100%'};`
-      : `background:${o.bottom};`}"></div>`;
+    const bar = (w) => {
+      if (tint && file) {
+        const m = `url("${o.bottom}") center / ${o.stretchBottom ? '100% 100%' : 'contain'} no-repeat`;
+        return html`<div style="width:${w};height:${t}px;background-color:${tint};-webkit-mask:${m};mask:${m};"></div>`;
+      }
+      const bg = tint ? `background:${tint};`
+        : (file
+          ? `background-image:url("${o.bottom}");background-repeat:repeat-x;background-size:${o.stretchBottom ? '100% 100%' : 'auto 100%'};`
+          : `background:${o.bottom};`);
+      return html`<div style="width:${w};height:${t}px;${bg}"></div>`;
+    };
     if (!horiz) {
       bottom = html`<div style="position:absolute;left:0;right:0;${lead}:0;line-height:0;pointer-events:none;">
-        ${(file && o.stretchBottom && !px)
+        ${(file && o.stretchBottom && !px && !tint)
           ? html`<img src=${o.bottom} style="display:block;width:100%;height:auto;">`
           : bar('100%')}</div>`;
     } else {
@@ -99,7 +117,15 @@ export function classicArt(o) {
     ? html`<img src=${o.frame} style="position:absolute;inset:0;width:100%;height:100%;object-fit:fill;pointer-events:none;">`
     : '';
 
-  return html`<div class="esc-art" style="position:absolute;inset:0;overflow:hidden;">
+  // Per-cover CSS frame: a border (width/colour/radius) on the clipping box, so the radius rounds
+  // the cover too. An alternative to a frame IMAGE; both may be set and will stack.
+  const fb = o.frameBorder || {};
+  const fbW = Number(fb.width) || 0, fbR = Number(fb.radius) || 0;
+  let border = '';
+  if (fbW > 0 && fb.color) border += `border:${fbW}px solid ${fb.color};`;
+  if (fbR > 0) border += `border-radius:${fbR}px;`;
+
+  return html`<div class="esc-art" style="position:absolute;inset:0;overflow:hidden;${border}">
     ${view}<div class="esc-art-cover" style="${box}">${fabric}${bottom}</div>${frame}
   </div>`;
 }

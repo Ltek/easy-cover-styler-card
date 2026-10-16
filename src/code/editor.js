@@ -2283,6 +2283,9 @@ export class EnhancedShutterCardEditor extends LitElement {
           bottom: src(val(C.CONFIG_SHUTTER_BOTTOM_IMAGE)) || paint(val(C.CONFIG_SHUTTER_BOTTOM_IMAGE)),
           frame: src(val(C.CONFIG_WINDOW_IMAGE)),
           stretchBottom: !!val(C.CONFIG_STRETCH_EDGE_SHUTTER_IMAGE),
+          matchBottomToSlat: !!val(C.CONFIG_SHUTTER_BOTTOM_MATCH_SLAT),
+          frameBorder: { width: val(C.CONFIG_FRAME_BORDER_WIDTH), color: val(C.CONFIG_FRAME_BORDER_COLOR),
+            radius: val(C.CONFIG_FRAME_BORDER_RADIUS) },
         })}
       </div>`;
 
@@ -2540,12 +2543,16 @@ export class EnhancedShutterCardEditor extends LitElement {
         ${this._rowSlider(this._csField(C.CONFIG_BASE_WIDTH_PX, { label: 'Base Width', type: 'slider', min: 20, max: 400, step: 5, unit: 'px' }))}
         ${this._rowSlider(this._csField(C.CONFIG_BASE_HEIGHT_PX, { label: 'Base Height', type: 'slider', min: 20, max: 400, step: 5, unit: 'px' }))}
         ${this._rowImageSelect(this._csField(C.CONFIG_WINDOW_IMAGE, { label: 'Window Image', type: 'imageSelect', options: C.BUNDLED_WINDOW_IMAGES, allowColour: false }))}
+        ${this._rowSlider(this._csField(C.CONFIG_FRAME_BORDER_WIDTH, { label: 'Frame Border Width', type: 'slider', min: 0, max: 12, step: 1, unit: 'px', zeroLabel: 'None', hint: 'Build your own frame as a border, instead of a Window Image.' }))}
+        ${this._rowColor(this._csField(C.CONFIG_FRAME_BORDER_COLOR, { label: 'Frame Border Colour', type: 'color', defaultLabel: 'None', seedHex: '#d8dde0' }))}
+        ${this._rowSlider(this._csField(C.CONFIG_FRAME_BORDER_RADIUS, { label: 'Frame Corner Radius', type: 'slider', min: 0, max: 40, step: 1, unit: 'px', zeroLabel: 'Square' }))}
         ${this._rowImageSelect(this._csField(C.CONFIG_VIEW_IMAGE, { label: 'View Image / Colour', type: 'imageSelect', options: C.BUNDLED_VIEW_IMAGES, seedHex: '#20303a' }))}
         ${this._rowImageSelect(this._csField(C.CONFIG_SHUTTER_SLAT_IMAGE, { label: 'Slat Image / Colour', type: 'imageSelect', options: C.BUNDLED_SLAT_IMAGES, seedHex: '#888888' }))}
-        ${this._rowImageSelect(this._csField(C.CONFIG_SHUTTER_BOTTOM_IMAGE, { label: 'Bottom-Bar Image', type: 'imageSelect', options: C.BUNDLED_BOTTOM_IMAGES, allowColour: false }))}
+        ${this._rowImageSelect(this._csField(C.CONFIG_SHUTTER_BOTTOM_IMAGE, { label: 'Bottom-Bar / Pull Image', type: 'imageSelect', options: C.BUNDLED_BOTTOM_IMAGES, allowColour: false }))}
         ${this._rowCheckRow({ label: 'Image Options', items: [
           this._csField(C.CONFIG_ROTATE_SLATS_SHUTTER_IMAGE, { label: 'Rotate Slat With Direction' }),
           this._csField(C.CONFIG_STRETCH_EDGE_SHUTTER_IMAGE, { label: 'Stretch Bottom Image' }),
+          this._csField(C.CONFIG_SHUTTER_BOTTOM_MATCH_SLAT, { label: 'Pull Matches Slat Colour' }),
         ] })}
         ${this._rowText(this._csField(C.CONFIG_IMAGE_MAP, { label: 'Images Base Path', type: 'text' }))}`)}
       ${this._csGroup('show', 'Show / Hide', () => html`

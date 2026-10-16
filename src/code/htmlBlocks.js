@@ -1063,6 +1063,9 @@ export class htmlBlockCentralWindow extends htmlBlock{
       frame: img.getWindowImageSrc(id) || '',
       stretchBottom: !!this.cfg.stretchEdgeImage(),
       bottomPx,
+      matchBottomToSlat: !!this.cfg.bottomMatchSlat(),
+      frameBorder: { width: this.cfg.frameBorderWidth(), color: this.cfg.frameBorderColor(),
+        radius: this.cfg.frameBorderRadius() },
     });
   }
   showSlide(){

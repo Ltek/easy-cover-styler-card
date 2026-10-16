@@ -5,6 +5,18 @@ resets. Newest first.
 
 ---
 
+## v2026.10.16.192
+
+- **Build your own frame.** The Image Slider gains a **Frame Border** — width, colour and corner
+  radius — so you can draw a plain window frame yourself instead of (or on top of) a Window Image.
+  Set width to `0` for none.
+- **Pull that matches the slat.** New **Pull Matches Slat Colour** option: when the slat is a solid
+  colour, the bottom bar / pull is painted the same colour so the shade reads as one piece. A shaped
+  pull image is tinted via a CSS mask, so only its silhouette takes the colour. No effect when the
+  slat is an image.
+- **New pull shapes.** Three recolourable bottom-bar images — **centre tab**, **full bar** and
+  **cord + knob** — drawn as SVG so they stay crisp and tint cleanly.
+
 ## v2026.10.01.191
 
 - **README credits reworded.** The card is no longer described as a "modernized fork": it began as a

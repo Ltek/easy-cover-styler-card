@@ -173,6 +173,12 @@ export const CONFIG_SHUTTER_SLAT_IMAGE = 'shutter_slat_image';
 export const CONFIG_SHUTTER_BOTTOM_IMAGE = 'shutter_bottom_image';
 export const CONFIG_ROTATE_SLATS_SHUTTER_IMAGE = 'rotate_slat_image';
 export const CONFIG_STRETCH_EDGE_SHUTTER_IMAGE = 'stretch_bottom_image';
+// Pull-shade builder (v2026.10.16): tint the bottom bar/pull to the slat colour, plus a per-cover
+// CSS frame (border width/colour/radius) as an alternative to a frame IMAGE (CONFIG_WINDOW_IMAGE).
+export const CONFIG_SHUTTER_BOTTOM_MATCH_SLAT = 'bottom_match_slat';
+export const CONFIG_FRAME_BORDER_WIDTH = 'frame_border_width';
+export const CONFIG_FRAME_BORDER_COLOR = 'frame_border_color';
+export const CONFIG_FRAME_BORDER_RADIUS = 'frame_border_radius';
 export const CONFIG_BASE_HEIGHT_PX = 'base_height_px';
 export const CONFIG_BASE_WIDTH_PX = 'base_width_px';
 export const CONFIG_RESIZE_HEIGHT_PCT = 'resize_height_pct';
@@ -189,7 +195,7 @@ export const HA_CARD_NAME = "easy-cover-styler-card";
 export const HA_SHUTTER_NAME = `easy-cover-styler`;
 export const HA_EDITOR_NAME = "easy-cover-styler-card-editor";
 export const CARD_DISPLAY_NAME = "Easy Cover Styler Card";
-export const CARD_VERSION = '2026.10.01.191';   // single source of truth (editor header + console banner)
+export const CARD_VERSION = '2026.10.16.192';   // single source of truth (editor header + console banner)
 export const HA_HUI_VIEW = 'hui-view';
 export const SPACE = ' ';
 
@@ -1138,6 +1144,10 @@ export const CONFIG_DEFAULT ={
   [CONFIG_SHUTTER_BOTTOM_IMAGE]: ESC_IMAGE_SHUTTER_BOTTOM,
   [CONFIG_ROTATE_SLATS_SHUTTER_IMAGE]: ESC_ROTATE_MAIN_SHUTTER_IMAGE,
   [CONFIG_STRETCH_EDGE_SHUTTER_IMAGE]: ESC_STRETCH_EDGE_SHUTTER_IMAGE,
+  [CONFIG_SHUTTER_BOTTOM_MATCH_SLAT]: false,
+  [CONFIG_FRAME_BORDER_WIDTH]: 0,
+  [CONFIG_FRAME_BORDER_COLOR]: '',
+  [CONFIG_FRAME_BORDER_RADIUS]: 0,
   [CONFIG_BASE_HEIGHT_PX]: ESC_BASE_HEIGHT_PX,
   [CONFIG_BASE_WIDTH_PX]: ESC_BASE_WIDTH_PX,
   [CONFIG_RESIZE_HEIGHT_PCT]: ESC_RESIZE_HEIGHT_PCT,
@@ -1354,6 +1364,10 @@ export const BUNDLED_BOTTOM_IMAGES = [
   { value: 'bottoms/shutter-bottom-dark.png',  label: 'Roller bottom bar — dark grey' },
   { value: 'bottoms/shutter-bottom-black.png', label: 'Roller bottom bar — black' },
   { value: 'bottoms/awning-bottom.png',   label: 'Awning bottom bar' },
+  // Recolourable pull shapes (SVG). Use with "Match slat colour" to tint them to the slat.
+  { value: 'bottoms/pull-tab.svg',  label: 'Pull — centre tab' },
+  { value: 'bottoms/pull-bar.svg',  label: 'Pull — full bar' },
+  { value: 'bottoms/pull-cord.svg', label: 'Pull — cord + knob' },
 ];
 export const ICON_MARGIN_LR = 3;
 export const ICON_MARGIN_TB = 8;

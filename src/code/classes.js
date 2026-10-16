@@ -2493,6 +2493,10 @@ export class shutterCfg {
 
     this.rotateSlatsImage(escConfig[C.CONFIG_ROTATE_SLATS_SHUTTER_IMAGE]);
     this.stretchEdgeImage(escConfig[C.CONFIG_STRETCH_EDGE_SHUTTER_IMAGE]);
+    this.bottomMatchSlat(escConfig[C.CONFIG_SHUTTER_BOTTOM_MATCH_SLAT]);
+    this.frameBorderWidth(escConfig[C.CONFIG_FRAME_BORDER_WIDTH]);
+    this.frameBorderColor(escConfig[C.CONFIG_FRAME_BORDER_COLOR]);
+    this.frameBorderRadius(escConfig[C.CONFIG_FRAME_BORDER_RADIUS]);
 
     this.scaleButtons(escConfig[C.CONFIG_SCALE_BUTTONS]);
     this.scaleIcons(escConfig[C.CONFIG_SCALE_ICONS]);
@@ -3119,6 +3123,18 @@ export class shutterCfg {
   }
   stretchEdgeImage(value = null){
     return this.#getCfg(C.CONFIG_STRETCH_EDGE_SHUTTER_IMAGE,value);
+  }
+  bottomMatchSlat(value = null){
+    return this.#getCfg(C.CONFIG_SHUTTER_BOTTOM_MATCH_SLAT,value);
+  }
+  frameBorderWidth(value = null){
+    return this.#getCfg(C.CONFIG_FRAME_BORDER_WIDTH,value);
+  }
+  frameBorderColor(value = null){
+    return this.#getCfg(C.CONFIG_FRAME_BORDER_COLOR,value);
+  }
+  frameBorderRadius(value = null){
+    return this.#getCfg(C.CONFIG_FRAME_BORDER_RADIUS,value);
   }
   scaleButtons(value = null){
     return this.#getCfg(C.CONFIG_SCALE_BUTTONS,value);

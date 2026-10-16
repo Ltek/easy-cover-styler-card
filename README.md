@@ -4,13 +4,13 @@ A Home Assistant Dashboard card for **shutters, blinds, curtains, shades and awn
 drawn as an animated window you can tap or drag, or as a coloured slider. Different kinds of cover can
 sit side by side on one card, and everything is set up in a visual editor.
 
-Current build: **v2026.10.01.191** · full history in [CHANGELOG.md](CHANGELOG.md)
+Current build: **v2026.10.16.192** · full history in [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
 ## Installation
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Ltek&repository=easy-cover-styler-card&category=dashboard)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Ltek&repository=easy-cover-styler-card&category=plugin)
 
 1. Click the button above. It opens HACS in your Home Assistant with this repository filled in.
 2. Add it, then click **Download**. HACS registers the Dashboard resource for you.
@@ -47,6 +47,8 @@ shades and curtains can share one card. Four built-ins are included — **Color 
 
 - **Image Slider** — an animated window built from a frame, an outside view, the cover fabric and a
   bottom bar. Many images are included, and any of them can be swapped for a plain colour.
+  - **Build your own frame** — a border with your own width, colour and corner radius, instead of a frame picture.
+  - **Pull that matches the slat** — paint the bottom bar / pull the same colour as the slat so the shade reads as one piece. Includes recolourable pull shapes: centre tab, full bar, cord + knob.
 - **Color Slider** — a coloured bar instead of pictures.
 - Readouts for the **Cover Name**, the **position**, and how long ago it **last changed**.
 - **Movement Buttons** can change colour, or hide, depending on whether the cover is open, closed or
@@ -116,3 +118,6 @@ Easy Cover Styler Card began as a fork of [hass-shutter-card](https://github.com
 by deejayfool and has since been rewritten. Some bundled artwork comes from other projects: the
 roller-shutter imagery from hass-shutter-card (Apache-2.0), and the window, balcony-door, outdoor-view
 and curtain/blind images from [pic-shutter-card](https://github.com/samoswall/pic-shutter-card)
+by samoswall (Apache-2.0).
+
+Licensed under the GNU General Public License v3.0 — see [LICENSE](LICENSE).

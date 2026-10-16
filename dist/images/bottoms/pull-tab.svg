@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40">
+  <!-- Centre T-nub pull. Grey fill shows when used directly; alpha is the mask shape when tinted. -->
+  <rect x="48" y="0" width="4" height="22" rx="2" fill="#9aa5ad"/>
+  <rect x="38" y="20" width="24" height="5" rx="2.5" fill="#9aa5ad"/>
+</svg>
