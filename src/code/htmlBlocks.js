@@ -1064,6 +1064,7 @@ export class htmlBlockCentralWindow extends htmlBlock{
       stretchBottom: !!this.cfg.stretchEdgeImage(),
       bottomPx,
       matchBottomToSlat: !!this.cfg.bottomMatchSlat(),
+      pullBelow: !!this.cfg.pullBelowSlat(),
       frameBorder: { width: this.cfg.frameBorderWidth(), color: this.cfg.frameBorderColor(),
         radius: this.cfg.frameBorderRadius() },
     });

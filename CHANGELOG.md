@@ -5,6 +5,18 @@ resets. Newest first.
 
 ---
 
+## v2026.10.16.193
+
+- **Pull now hangs below the slat.** New **Pull Hangs Below Slat** option (Image Options): the pull
+  cord/handle is drawn below the slat's leading edge, into the open area, instead of flush inside the
+  slat. This also keeps a slat-coloured pull visible (a white pull on a white slat was invisible
+  before). Top-down covers; the pull is no longer clipped by the slat box.
+- **Window Image can be set to None.** The Window Image picker gains a **None (no image)** choice, so
+  you can use just the border frame (or no frame at all) without a window picture.
+- **One-click Pull-Shade preset.** A **Pull-Shade style** button in the Image Slider group sets it all
+  up: solid slat, a pull cord that matches the slat and hangs below it, a thin border frame, and no
+  window picture. Tweak anything afterwards.
+
 ## v2026.10.16.192
 
 - **Build your own frame.** The Image Slider gains a **Frame Border** — width, colour and corner

@@ -347,7 +347,8 @@ export class EnhancedShutterCardEditor extends LitElement {
       && !/\.(png|jpe?g|gif|webp|svg)$/i.test(v) && !/^\/|^https?:/i.test(v);
     const mode = forced ? forced
       : (cur === '' ? 'default'
-        : (known.has(cur) ? cur : (looksColour(cur) ? '__colour__' : '__custom__')));
+        : (f.allowNone && cur === 'none' ? '__none__'
+          : (known.has(cur) ? cur : (looksColour(cur) ? '__colour__' : '__custom__'))));
     const onSelect = (v) => {
       if (v === '__custom__' || v === '__colour__') {
         this._imgSel = { ...(this._imgSel || {}), [f.key]: v };
@@ -356,7 +357,7 @@ export class EnhancedShutterCardEditor extends LitElement {
         return;
       }
       const next = { ...(this._imgSel || {}) }; delete next[f.key]; this._imgSel = next;
-      this._put(f, v === '__default__' ? '' : v);
+      this._put(f, v === '__default__' ? '' : (v === '__none__' ? 'none' : v));
     };
     return html`
       <div class="row">
@@ -364,6 +365,7 @@ export class EnhancedShutterCardEditor extends LitElement {
         <div class="color-ctrl">
           <select @change=${(e) => onSelect(e.target.value)}>
             <option value="__default__" ?selected=${mode === 'default'}>${f.defaultLabel || 'Automatic (from cover type)'}</option>
+            ${f.allowNone ? html`<option value="__none__" ?selected=${mode === '__none__'}>None (no image)</option>` : ''}
             ${opts.map(o => html`<option value=${o.value} ?selected=${mode === o.value}>${o.label} (${o.value})</option>`)}
             ${f.allowColour === false ? '' : html`
               <option value="__colour__" ?selected=${mode === '__colour__'}>Custom colour…</option>`}
@@ -2234,6 +2236,25 @@ export class EnhancedShutterCardEditor extends LitElement {
       },
     };
   }
+  // One-click "Pull Shade" look: solid slat, a pull cord that matches the slat and hangs below it,
+  // a thin border frame, and no window picture. Writes the draft; the user can tweak any part after.
+  _applyPullShadePreset() {
+    const g = { ...((this._csDraft && this._csDraft.groups) || {}) };
+    g[C.CONFIG_COVER_VISUAL] = 'image';
+    g[C.CONFIG_WINDOW_IMAGE] = 'none';                 // no window frame picture
+    g[C.CONFIG_SHUTTER_BOTTOM_IMAGE] = 'bottoms/pull-cord.svg';
+    g[C.CONFIG_SHUTTER_BOTTOM_MATCH_SLAT] = true;      // pull takes the slat colour
+    g[C.CONFIG_PULL_BELOW_SLAT] = true;                // and hangs below the slat
+    g[C.CONFIG_STRETCH_EDGE_SHUTTER_IMAGE] = false;    // keep the pull's shape, don't stretch it
+    const slat = g[C.CONFIG_SHUTTER_SLAT_IMAGE];
+    if (!slat || /\.(png|jpe?g|gif|webp|svg)$/i.test(String(slat))) g[C.CONFIG_SHUTTER_SLAT_IMAGE] = '#ffffff';
+    g[C.CONFIG_FRAME_BORDER_WIDTH] = 2;
+    g[C.CONFIG_FRAME_BORDER_COLOR] = '#d8dde0';
+    g[C.CONFIG_FRAME_BORDER_RADIUS] = 4;
+    this._csDraft = { ...this._csDraft, groups: g };
+    this._imgSel = {};   // clear forced picker modes so the selects reflect the new values
+    this.requestUpdate();
+  }
   // Live preview of the Cover Style draft at three positions. Classic styles stack the real image
   // slots (view behind, slat covering the open fraction, bottom bar at the edge); modern styles draw
   // the embedded bar. Mirrors how the card composes a cover, without instantiating one.
@@ -2284,6 +2305,7 @@ export class EnhancedShutterCardEditor extends LitElement {
           frame: src(val(C.CONFIG_WINDOW_IMAGE)),
           stretchBottom: !!val(C.CONFIG_STRETCH_EDGE_SHUTTER_IMAGE),
           matchBottomToSlat: !!val(C.CONFIG_SHUTTER_BOTTOM_MATCH_SLAT),
+          pullBelow: !!val(C.CONFIG_PULL_BELOW_SLAT),
           frameBorder: { width: val(C.CONFIG_FRAME_BORDER_WIDTH), color: val(C.CONFIG_FRAME_BORDER_COLOR),
             radius: val(C.CONFIG_FRAME_BORDER_RADIUS) },
         })}
@@ -2542,7 +2564,9 @@ export class EnhancedShutterCardEditor extends LitElement {
         : this._csGroup('images', 'Image Slider', () => html`
         ${this._rowSlider(this._csField(C.CONFIG_BASE_WIDTH_PX, { label: 'Base Width', type: 'slider', min: 20, max: 400, step: 5, unit: 'px' }))}
         ${this._rowSlider(this._csField(C.CONFIG_BASE_HEIGHT_PX, { label: 'Base Height', type: 'slider', min: 20, max: 400, step: 5, unit: 'px' }))}
-        ${this._rowImageSelect(this._csField(C.CONFIG_WINDOW_IMAGE, { label: 'Window Image', type: 'imageSelect', options: C.BUNDLED_WINDOW_IMAGES, allowColour: false }))}
+        <div class="row"><label class="row-label" title="Set up a plain pull-shade: solid slat, a pull cord that matches the slat and hangs below it, a thin border frame, and no window picture.">Quick preset</label>
+          <button class="add-btn" @click=${() => this._applyPullShadePreset()}>Pull-Shade style</button></div>
+        ${this._rowImageSelect(this._csField(C.CONFIG_WINDOW_IMAGE, { label: 'Window Image', type: 'imageSelect', options: C.BUNDLED_WINDOW_IMAGES, allowColour: false, allowNone: true }))}
         ${this._rowSlider(this._csField(C.CONFIG_FRAME_BORDER_WIDTH, { label: 'Frame Border Width', type: 'slider', min: 0, max: 12, step: 1, unit: 'px', zeroLabel: 'None', hint: 'Build your own frame as a border, instead of a Window Image.' }))}
         ${this._rowColor(this._csField(C.CONFIG_FRAME_BORDER_COLOR, { label: 'Frame Border Colour', type: 'color', defaultLabel: 'None', seedHex: '#d8dde0' }))}
         ${this._rowSlider(this._csField(C.CONFIG_FRAME_BORDER_RADIUS, { label: 'Frame Corner Radius', type: 'slider', min: 0, max: 40, step: 1, unit: 'px', zeroLabel: 'Square' }))}
@@ -2553,6 +2577,7 @@ export class EnhancedShutterCardEditor extends LitElement {
           this._csField(C.CONFIG_ROTATE_SLATS_SHUTTER_IMAGE, { label: 'Rotate Slat With Direction' }),
           this._csField(C.CONFIG_STRETCH_EDGE_SHUTTER_IMAGE, { label: 'Stretch Bottom Image' }),
           this._csField(C.CONFIG_SHUTTER_BOTTOM_MATCH_SLAT, { label: 'Pull Matches Slat Colour' }),
+          this._csField(C.CONFIG_PULL_BELOW_SLAT, { label: 'Pull Hangs Below Slat' }),
         ] })}
         ${this._rowText(this._csField(C.CONFIG_IMAGE_MAP, { label: 'Images Base Path', type: 'text' }))}`)}
       ${this._csGroup('show', 'Show / Hide', () => html`

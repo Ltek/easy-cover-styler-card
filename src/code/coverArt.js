@@ -31,6 +31,8 @@ export const isImageFile = (v) => typeof v === 'string' && v.trim() !== '' && (
  *   matchBottomToSlat  when the slat is a solid colour, paint the bottom bar/pull in that same
  *                      colour (a shape image is tinted via a CSS mask), so the pull reads as one
  *                      piece with the shade. No effect when the slat is an image.
+ *   pullBelow     top-down covers only: hang the pull BELOW the slat's leading edge, into the open
+ *                 area (drawn outside the clipped cover box), the way a pull-shade cord/handle does.
  *   frameBorder   { width, color, radius } — a per-cover CSS frame drawn as a border on the cover,
  *                 an alternative (or addition) to a frame IMAGE.
  */
@@ -82,9 +84,13 @@ export function classicArt(o) {
   // empty bottom just becomes a solid bar of the slat colour. The untinted paths are left untouched.
   const slatIsColour = o.slat && !isImageFile(o.slat);
   const tint = (o.matchBottomToSlat && slatIsColour) ? o.slat : '';
+  const file = isImageFile(o.bottom);
+  // A "pull" hangs BELOW the slat's leading edge, into the open area, so it reads as a cord/handle and
+  // a slat-coloured pull stays visible against the view. Top-down covers only; other directions keep
+  // the flush bar. Drawn OUTSIDE the clipped cover box (see hangPull below), so it is not cut off.
+  const wantHang = !!o.pullBelow && dir === 'down' && !!(o.bottom || tint);
   let bottom = '';
-  if (o.bottom || tint) {
-    const file = isImageFile(o.bottom);
+  if ((o.bottom || tint) && !wantHang) {
     const px = Number(o.bottomPx) > 0 ? Number(o.bottomPx) : 0;
     const t = px || 8;
     const bar = (w) => {
@@ -110,6 +116,22 @@ export function classicArt(o) {
     }
   }
 
+  // the hanging pull, pinned to the leading edge in the (unclipped) art layer so it drops below the slat
+  let hangPull = '';
+  if (wantHang) {
+    const ph = Number(o.bottomPx) > 0 ? Number(o.bottomPx) : 18;
+    const base = `position:absolute;left:0;right:0;top:${o.len};height:${ph}px;pointer-events:none;`;
+    if (file && tint) {
+      const m = `url("${o.bottom}") center top / contain no-repeat`;
+      hangPull = html`<div style="${base}background-color:${tint};-webkit-mask:${m};mask:${m};"></div>`;
+    } else if (file) {
+      hangPull = html`<div style="${base}background:url("${o.bottom}") center top / contain no-repeat;"></div>`;
+    } else {
+      const c = tint || o.bottom;
+      hangPull = html`<div style="${base}display:flex;justify-content:center;"><div style="width:30%;height:100%;background:${c};"></div></div>`;
+    }
+  }
+
   const view = isImageFile(o.view)
     ? html`<img src=${o.view} style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none;">`
     : (o.view ? html`<div style="position:absolute;inset:0;background:${o.view};"></div>` : '');
@@ -126,7 +148,7 @@ export function classicArt(o) {
   if (fbR > 0) border += `border-radius:${fbR}px;`;
 
   return html`<div class="esc-art" style="position:absolute;inset:0;overflow:hidden;${border}">
-    ${view}<div class="esc-art-cover" style="${box}">${fabric}${bottom}</div>${frame}
+    ${view}<div class="esc-art-cover" style="${box}">${fabric}${bottom}</div>${hangPull}${frame}
   </div>`;
 }
 

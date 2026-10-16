@@ -176,6 +176,7 @@ export const CONFIG_STRETCH_EDGE_SHUTTER_IMAGE = 'stretch_bottom_image';
 // Pull-shade builder (v2026.10.16): tint the bottom bar/pull to the slat colour, plus a per-cover
 // CSS frame (border width/colour/radius) as an alternative to a frame IMAGE (CONFIG_WINDOW_IMAGE).
 export const CONFIG_SHUTTER_BOTTOM_MATCH_SLAT = 'bottom_match_slat';
+export const CONFIG_PULL_BELOW_SLAT = 'pull_below_slat';
 export const CONFIG_FRAME_BORDER_WIDTH = 'frame_border_width';
 export const CONFIG_FRAME_BORDER_COLOR = 'frame_border_color';
 export const CONFIG_FRAME_BORDER_RADIUS = 'frame_border_radius';
@@ -195,7 +196,7 @@ export const HA_CARD_NAME = "easy-cover-styler-card";
 export const HA_SHUTTER_NAME = `easy-cover-styler`;
 export const HA_EDITOR_NAME = "easy-cover-styler-card-editor";
 export const CARD_DISPLAY_NAME = "Easy Cover Styler Card";
-export const CARD_VERSION = '2026.10.16.192';   // single source of truth (editor header + console banner)
+export const CARD_VERSION = '2026.10.16.193';   // single source of truth (editor header + console banner)
 export const HA_HUI_VIEW = 'hui-view';
 export const SPACE = ' ';
 
@@ -1145,6 +1146,7 @@ export const CONFIG_DEFAULT ={
   [CONFIG_ROTATE_SLATS_SHUTTER_IMAGE]: ESC_ROTATE_MAIN_SHUTTER_IMAGE,
   [CONFIG_STRETCH_EDGE_SHUTTER_IMAGE]: ESC_STRETCH_EDGE_SHUTTER_IMAGE,
   [CONFIG_SHUTTER_BOTTOM_MATCH_SLAT]: false,
+  [CONFIG_PULL_BELOW_SLAT]: false,
   [CONFIG_FRAME_BORDER_WIDTH]: 0,
   [CONFIG_FRAME_BORDER_COLOR]: '',
   [CONFIG_FRAME_BORDER_RADIUS]: 0,

@@ -2494,6 +2494,7 @@ export class shutterCfg {
     this.rotateSlatsImage(escConfig[C.CONFIG_ROTATE_SLATS_SHUTTER_IMAGE]);
     this.stretchEdgeImage(escConfig[C.CONFIG_STRETCH_EDGE_SHUTTER_IMAGE]);
     this.bottomMatchSlat(escConfig[C.CONFIG_SHUTTER_BOTTOM_MATCH_SLAT]);
+    this.pullBelowSlat(escConfig[C.CONFIG_PULL_BELOW_SLAT]);
     this.frameBorderWidth(escConfig[C.CONFIG_FRAME_BORDER_WIDTH]);
     this.frameBorderColor(escConfig[C.CONFIG_FRAME_BORDER_COLOR]);
     this.frameBorderRadius(escConfig[C.CONFIG_FRAME_BORDER_RADIUS]);
@@ -3126,6 +3127,9 @@ export class shutterCfg {
   }
   bottomMatchSlat(value = null){
     return this.#getCfg(C.CONFIG_SHUTTER_BOTTOM_MATCH_SLAT,value);
+  }
+  pullBelowSlat(value = null){
+    return this.#getCfg(C.CONFIG_PULL_BELOW_SLAT,value);
   }
   frameBorderWidth(value = null){
     return this.#getCfg(C.CONFIG_FRAME_BORDER_WIDTH,value);
