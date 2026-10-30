@@ -5,6 +5,10 @@ resets. Newest first.
 
 ---
 
+## v2026.10.30.196
+
+- **Named "Easy Cover Styler Card (Ltek)" in Home Assistant's *Add card* picker**, matching its HACS name, so searching "Ltek" finds it. The card type is unchanged, so existing dashboards are not affected.
+
 ## v2026.10.16.195
 
 - **Quick Start Presets are easier to find.** They moved out of the Image Slider group to an

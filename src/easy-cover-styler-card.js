@@ -46,7 +46,7 @@ define(C.HA_EDITOR_NAME, EnhancedShutterCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: C.HA_CARD_NAME,
-  name: C.CARD_DISPLAY_NAME,
+  name: `${C.CARD_DISPLAY_NAME} (Ltek)`,
   preview: true,
   description: "A flexible cover card for shutters, blinds, awnings, curtains, windows and doors",
   documentationURL: "https://github.com/Ltek/easy-cover-styler-card"
